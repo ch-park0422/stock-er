@@ -1,65 +1,857 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import React, { useState, useMemo, useCallback } from 'react';
+import {
+  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea,
+  Area, Cell,
+} from 'recharts';
+import {
+  Search, TrendingUp, TrendingDown, Building2, Users,
+  Activity, DollarSign, BarChart2, Target, ArrowUpRight,
+  ArrowDownRight, Minus, Zap, ChevronRight, SlidersHorizontal,
+  Info,
+} from 'lucide-react';
+
+/* ── 분석 라이브러리 ─────────────────────────── */
+import {
+  calculateDCF, getValuationLabel, calculateAIScore,
+  detectMACross,
+} from '@/lib/analysis';
+import {
+  COMPANY_DB, GenerateMockData, START_PRICES,
+  type CompanyFundamentals,
+} from '@/lib/mockData';
+
+/* ── QA 하네스 모니터 ───────────────────────── */
+import QAHarnessMonitor from '@/app/components/QAHarnessMonitor';
+
+/* ─────────────────────────────────────────────
+ * 0. 유틸
+ * ───────────────────────────────────────────── */
+function cn(...c: (string | boolean | undefined | null)[]): string {
+  return c.filter(Boolean).join(' ');
+}
+function fmt(n: number, d = 2) { return n.toFixed(d); }
+
+/* ─────────────────────────────────────────────
+ * DCF 파라미터 상태 타입
+ * ───────────────────────────────────────────── */
+interface DCFUserParams {
+  growthRate: number;       // 0.01 – 0.40
+  discountRate: number;     // 0.05 – 0.15
+  terminalGrowthRate: number; // 0.00 – 0.05
+}
+
+/* ─────────────────────────────────────────────
+ * 1. 커스텀 툴팁
+ * ───────────────────────────────────────────── */
+type TooltipPayload = { dataKey: string; value: number; payload: Record<string, number> };
+
+const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: TooltipPayload[]; label?: string }) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="bg-gray-900 border border-gray-700/80 rounded-xl p-3 text-xs shadow-2xl">
+      <p className="text-gray-400 mb-2 font-semibold">{label}</p>
+      <div className="space-y-1">
+        <div className="flex justify-between gap-4"><span className="text-gray-500">종가</span><span className="text-blue-400 font-bold">${d.close}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-gray-500">시가</span><span className="text-gray-300">${d.open}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-gray-500">고가</span><span className="text-emerald-400">${d.high}</span></div>
+        <div className="flex justify-between gap-4"><span className="text-gray-500">저가</span><span className="text-rose-400">${d.low}</span></div>
+        {d.sma20 && <div className="flex justify-between gap-4 pt-1 border-t border-gray-800"><span className="text-gray-500">SMA20</span><span className="text-orange-400">${d.sma20}</span></div>}
+        {d.sma60 && <div className="flex justify-between gap-4"><span className="text-gray-500">SMA60</span><span className="text-red-400">${d.sma60}</span></div>}
+        <div className="flex justify-between gap-4 pt-1 border-t border-gray-800">
+          <span className="text-gray-500">거래량</span>
+          <span className="text-gray-300">{((d.volume ?? 0) / 1_000_000).toFixed(1)}M</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RSITooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
+  if (!active || !payload?.length) return null;
+  const rsi = payload[0].value;
+  const zone = rsi >= 70 ? { t: '과매수', c: 'text-rose-400' } : rsi <= 30 ? { t: '과매도', c: 'text-emerald-400' } : { t: '중립', c: 'text-gray-400' };
+  return (
+    <div className="bg-gray-900 border border-gray-700/80 rounded-xl p-3 text-xs shadow-2xl">
+      <p className="text-gray-400 mb-1.5 font-semibold">{label}</p>
+      <p className="text-violet-400 font-bold text-sm">RSI: {rsi?.toFixed(2)}</p>
+      <p className={cn('mt-1', zone.c)}>{zone.t} 구간</p>
+    </div>
+  );
+};
+
+const MACDTooltip = ({ active, payload, label }: { active?: boolean; payload?: TooltipPayload[]; label?: string }) => {
+  if (!active || !payload?.length) return null;
+  const macd = payload.find(p => p.dataKey === 'macdLine')?.value;
+  const sig  = payload.find(p => p.dataKey === 'signalLine')?.value;
+  const hist = payload.find(p => p.dataKey === 'histogram')?.value;
+  return (
+    <div className="bg-gray-900 border border-gray-700/80 rounded-xl p-3 text-xs shadow-2xl">
+      <p className="text-gray-400 mb-1.5 font-semibold">{label}</p>
+      {macd != null && <div className="flex justify-between gap-4"><span className="text-gray-500">MACD</span><span className="text-blue-400 font-bold">{macd.toFixed(3)}</span></div>}
+      {sig  != null && <div className="flex justify-between gap-4"><span className="text-gray-500">Signal</span><span className="text-orange-400">{sig.toFixed(3)}</span></div>}
+      {hist != null && <div className="flex justify-between gap-4 pt-1 border-t border-gray-800"><span className="text-gray-500">Hist</span><span className={hist >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{hist.toFixed(3)}</span></div>}
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────
+ * 2. DCF 파라미터 슬라이더 패널
+ * ───────────────────────────────────────────── */
+interface SliderProps {
+  label: string;
+  sub: string;
+  value: number;
+  min: number; max: number; step: number;
+  format: (v: number) => string;
+  onChange: (v: number) => void;
+  color: string;
+}
+function ParamSlider({ label, sub, value, min, max, step, format, onChange, color }: SliderProps) {
+  const pct = ((value - min) / (max - min)) * 100;
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-2">
+        <div>
+          <span className="text-xs font-semibold text-gray-300">{label}</span>
+          <span className="text-[10px] text-gray-600 ml-2">{sub}</span>
+        </div>
+        <span className={cn('text-sm font-bold', color)}>{format(value)}</span>
+      </div>
+      <div className="relative h-2 bg-gray-800 rounded-full">
+        <div
+          className={cn('absolute h-full rounded-full', color.replace('text-', 'bg-'))}
+          style={{ width: `${pct}%` }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+        <input
+          type="range" min={min} max={max} step={step} value={value}
+          onChange={e => onChange(parseFloat(e.target.value))}
+          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+        />
+      </div>
+      <div className="flex justify-between text-[10px] text-gray-700 mt-1">
+        <span>{format(min)}</span><span>{format(max)}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 3. DCF 게이지
+ * ───────────────────────────────────────────── */
+interface DCFGaugeProps {
+  company: CompanyFundamentals;
+  params: DCFUserParams;
+  onParamChange: (p: Partial<DCFUserParams>) => void;
+}
+function DCFGauge({ company, params, onParamChange }: DCFGaugeProps) {
+  const dcfResult = useMemo(() => calculateDCF({
+    fcf: company.fcf,
+    shares: company.shares,
+    netDebt: company.netDebt,
+    growthRate: params.growthRate,
+    discountRate: params.discountRate,
+    terminalGrowthRate: params.terminalGrowthRate,
+  }), [company, params]);
+
+  const fairValue = dcfResult.fairValuePerShare;
+  const valuation = getValuationLabel(fairValue, company.currentPrice);
+
+  const bearVal = fairValue * 0.70;
+  const bullVal = fairValue * 1.40;
+  const range   = bullVal - bearVal;
+  const curPos  = Math.min(Math.max(((company.currentPrice - bearVal) / range) * 100, 2), 97);
+  const fairPos = 50; // 적정가는 항상 중앙
+
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6 h-full flex flex-col">
+      {/* 헤더 */}
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="text-white font-bold text-base flex items-center gap-2">
+            <Target className="w-4 h-4 text-blue-400" />
+            DCF 적정 주가 분석
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">현금흐름할인(DCF) 모델 · 슬라이더로 가정치 조정</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className={cn('px-3 py-1.5 rounded-xl text-sm font-bold border', valuation.bgColor, valuation.borderColor, valuation.color)}>
+          {valuation.upsidePct > 0 ? '▲' : '▼'} {Math.abs(valuation.upsidePct).toFixed(1)}%&nbsp;
+          {valuation.label}
+        </div>
+      </div>
+
+      {/* 게이지 */}
+      <div className="relative mt-8 mb-12">
+        <div className="h-7 rounded-full bg-gradient-to-r from-rose-600/80 via-amber-500/80 to-emerald-500/80 relative overflow-visible shadow-inner">
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-white/60 font-medium select-none">저평가</span>
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-white/60 font-medium select-none">고평가</span>
+
+          {/* 적정가 마커 (중앙 50%) */}
+          <div className="absolute top-0 bottom-0 flex flex-col items-center" style={{ left: `${fairPos}%` }}>
+            <div className="absolute -top-7 transform -translate-x-1/2 whitespace-nowrap">
+              <span className="text-[11px] font-bold text-yellow-300 bg-yellow-500/20 border border-yellow-500/40 px-2 py-0.5 rounded-full">
+                적정 ${fmt(fairValue)}
+              </span>
+            </div>
+            <div className="w-0.5 h-full bg-yellow-300/80" />
+            <div className="absolute -bottom-2 w-2.5 h-2.5 bg-yellow-300 rounded-full transform -translate-x-1/2" style={{ left: '50%' }} />
+          </div>
+
+          {/* 현재가 마커 */}
+          <div className="absolute top-0 bottom-0" style={{ left: `${curPos}%` }}>
+            <div className="w-1 h-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+            <div className="absolute -bottom-9 transform -translate-x-1/2 whitespace-nowrap" style={{ left: '50%' }}>
+              <span className="text-[11px] font-bold text-white bg-blue-600 px-2 py-0.5 rounded-full">
+                현재 ${fmt(company.currentPrice)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 수치 요약 */}
+      <div className="grid grid-cols-3 gap-2 mb-5">
+        {[
+          { l: '🐻 Bear (-30%)', v: `$${fmt(bearVal)}`,              c: 'text-rose-400' },
+          { l: '현재 주가',      v: `$${fmt(company.currentPrice)}`, c: 'text-white font-bold' },
+          { l: '🐂 Bull (+40%)', v: `$${fmt(bullVal)}`,              c: 'text-emerald-400' },
+        ].map(item => (
+          <div key={item.l} className="bg-gray-800/50 rounded-xl p-2.5 text-center">
+            <p className="text-[10px] text-gray-500 mb-1 leading-tight">{item.l}</p>
+            <p className={cn('text-sm', item.c)}>{item.v}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* DCF 세부 지표 */}
+      <div className="grid grid-cols-3 gap-2 mb-5 text-center">
+        {[
+          { l: 'PV of FCFs',     v: `$${(dcfResult.pvOfFCFs / 1000).toFixed(1)}B` },
+          { l: 'Terminal Value', v: `$${(dcfResult.pvOfTerminalValue / 1000).toFixed(1)}B` },
+          { l: 'EV',             v: `$${(dcfResult.enterpriseValue / 1000).toFixed(1)}B` },
+        ].map(item => (
+          <div key={item.l} className="bg-gray-800/30 rounded-xl p-2.5">
+            <p className="text-[10px] text-gray-600 mb-1">{item.l}</p>
+            <p className="text-sm font-bold text-gray-200">{item.v}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ─── 슬라이더 패널 ─── */}
+      <div className="border-t border-gray-800 pt-4 space-y-4">
+        <div className="flex items-center gap-2 mb-3">
+          <SlidersHorizontal className="w-3.5 h-3.5 text-blue-400" />
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">DCF 가정치 조정</span>
+          <button
+            className="ml-auto text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+            onClick={() => onParamChange({
+              growthRate: company.defaultGrowthRate,
+              discountRate: company.defaultWACC,
+              terminalGrowthRate: company.defaultTerminalGrowth,
+            })}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            ↺ 기본값
+          </button>
+        </div>
+        <ParamSlider
+          label="FCF 성장률" sub="예상 연간 잉여현금흐름 성장률"
+          value={params.growthRate} min={0.01} max={0.40} step={0.005}
+          format={v => `${(v * 100).toFixed(1)}%`}
+          onChange={v => onParamChange({ growthRate: v })}
+          color="text-blue-400"
+        />
+        <ParamSlider
+          label="할인율 (WACC)" sub="가중평균자본비용"
+          value={params.discountRate} min={0.05} max={0.15} step={0.005}
+          format={v => `${(v * 100).toFixed(1)}%`}
+          onChange={v => onParamChange({ discountRate: v })}
+          color="text-purple-400"
+        />
+        <ParamSlider
+          label="영구 성장률" sub="터미널 밸류 영구 성장 가정"
+          value={params.terminalGrowthRate} min={0.005} max={0.05} step={0.005}
+          format={v => `${(v * 100).toFixed(1)}%`}
+          onChange={v => onParamChange({ terminalGrowthRate: v })}
+          color="text-amber-400"
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 4. 메트릭 카드
+ * ───────────────────────────────────────────── */
+function MetricCard({ label, value, industryAvg, unit, description, higherIsBetter = false, isPercent = false }: {
+  label: string; value: number; industryAvg: number; unit: string;
+  description: string; higherIsBetter?: boolean; isPercent?: boolean;
+}) {
+  const display    = isPercent ? `${value.toFixed(1)}%` : `${value.toFixed(1)}${unit}`;
+  const indDisplay = isPercent ? `${industryAvg.toFixed(1)}%` : `${industryAvg.toFixed(1)}${unit}`;
+  const isGood     = higherIsBetter ? value >= industryAvg : value <= industryAvg;
+  const diffPct    = Math.abs(((value - industryAvg) / industryAvg) * 100);
+  const barWidth   = Math.min((value / (industryAvg * 2)) * 100, 100);
+
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5 hover:border-blue-500/40 hover:shadow-lg hover:shadow-blue-500/5 transition-all duration-300">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold">{label}</p>
+          <p className="text-3xl font-bold text-white mt-1.5 leading-none">{display}</p>
+        </div>
+        <span className={cn(
+          'text-[11px] px-2.5 py-1 rounded-full font-bold',
+          isGood ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+                 : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
+        )}>
+          {isGood ? '양호' : '주의'}
+        </span>
+      </div>
+      <div className="mb-3 relative pt-5">
+        <div className="absolute top-0 text-[10px] text-gray-600 transform -translate-x-1/2" style={{ left: '50%' }}>
+          업종평균 ({indDisplay})
+        </div>
+        <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden relative">
+          <div className={cn('h-full rounded-full transition-all duration-700 ease-out',
+            isGood ? 'bg-gradient-to-r from-blue-600 to-blue-400' : 'bg-gradient-to-r from-amber-600 to-amber-400')}
+            style={{ width: `${barWidth}%` }} />
+        </div>
+        <div className="absolute top-5 h-2.5 w-px bg-gray-500" style={{ left: '50%' }} />
+      </div>
+      <div className="flex items-center justify-between text-xs mt-4">
+        <span className="text-gray-500">업종평균 <span className="text-gray-300 font-medium">{indDisplay}</span></span>
+        <span className={cn('font-bold', isGood ? 'text-emerald-400' : 'text-rose-400')}>
+          {isGood ? (higherIsBetter ? '▲' : '▼') : (higherIsBetter ? '▼' : '▲')} {diffPct.toFixed(1)}%
+        </span>
+      </div>
+      <p className="text-[11px] text-gray-600 mt-3 pt-3 border-t border-gray-800 leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 5. 재무 건전성 카드
+ * ───────────────────────────────────────────── */
+function FinancialHealth({ company }: { company: CompanyFundamentals }) {
+  const f = company;
+  const margins = [
+    { label: '매출총이익률',  value: f.grossMargin,     grad: 'from-blue-500 to-blue-400',     text: 'text-blue-400' },
+    { label: '영업이익률',    value: f.operatingMargin, grad: 'from-purple-500 to-purple-400', text: 'text-purple-400' },
+    { label: '순이익률',      value: f.netMargin,       grad: 'from-emerald-500 to-emerald-400', text: 'text-emerald-400' },
+  ];
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5 h-full flex flex-col">
+      <h3 className="text-white font-bold text-base flex items-center gap-2 mb-5">
+        <Activity className="w-4 h-4 text-blue-400" />
+        수익성 &amp; 재무 건전성
+      </h3>
+      <div className="space-y-4 flex-1">
+        {margins.map(m => (
+          <div key={m.label}>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs text-gray-400">{m.label}</span>
+              <span className={cn('text-sm font-bold', m.text)}>{m.value.toFixed(1)}%</span>
+            </div>
+            <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div className={cn('h-full rounded-full bg-gradient-to-r transition-all duration-700', m.grad)}
+                style={{ width: `${Math.min(m.value, 100)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 pt-5 border-t border-gray-800 grid grid-cols-3 gap-2">
+        {[
+          { label: '배당수익률',    value: f.dividendYield === 0 ? '없음' : `${f.dividendYield.toFixed(2)}%` },
+          { label: '부채비율(D/E)', value: f.debtToEquity.toFixed(2) },
+          { label: '유동비율',      value: f.currentRatio.toFixed(2) },
+        ].map(item => (
+          <div key={item.label} className="bg-gray-800/50 rounded-xl p-3 text-center">
+            <p className="text-[10px] text-gray-500 mb-1 leading-tight">{item.label}</p>
+            <p className="text-sm font-bold text-white">{item.value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 6. AI 종합 점수 위젯
+ * ───────────────────────────────────────────── */
+function AIScoreWidget({ company, params, chartData }: {
+  company: CompanyFundamentals;
+  params: DCFUserParams;
+  chartData: ReturnType<typeof GenerateMockData>;
+}) {
+  const aiScore = useMemo(() => {
+    const dcfFair = calculateDCF({
+      fcf: company.fcf, shares: company.shares, netDebt: company.netDebt,
+      ...params,
+    }).fairValuePerShare;
+
+    const sma20s = chartData.chartRows.map(r => r.sma20);
+    const sma60s = chartData.chartRows.map(r => r.sma60);
+    const cross  = detectMACross(sma20s, sma60s, 10);
+
+    return calculateAIScore({
+      currentPrice: company.currentPrice,
+      dcfFairValue: dcfFair,
+      rsi: chartData.latestRSI,
+      crossSignal: cross,
+      per: company.per,
+      industryPer: company.industryPer,
+      pbr: company.pbr,
+      industryPbr: company.industryPbr,
+    });
+  }, [company, params, chartData]);
+
+  const radius = 54;
+  const circ   = 2 * Math.PI * radius;
+  const dash   = (aiScore.score / 100) * circ;
+  const scoreColor = aiScore.score >= 65 ? '#10b981' : aiScore.score >= 45 ? '#f59e0b' : '#ef4444';
+
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6">
+      <h3 className="text-white font-bold text-base flex items-center gap-2 mb-5">
+        <Zap className="w-4 h-4 text-yellow-400" />
+        AI 종합 투자 매력도
+        <span className="ml-auto text-[10px] text-gray-600 flex items-center gap-1">
+          <Info className="w-3 h-3" /> 슬라이더 조정 시 실시간 갱신
+        </span>
+      </h3>
+
+      <div className="flex flex-col sm:flex-row gap-6 items-center">
+        {/* 원형 게이지 */}
+        <div className="relative flex-shrink-0">
+          <svg width="140" height="140" className="-rotate-90">
+            <circle cx="70" cy="70" r={radius} fill="none" stroke="#1f2937" strokeWidth="10" />
+            <circle
+              cx="70" cy="70" r={radius} fill="none"
+              stroke={scoreColor} strokeWidth="10"
+              strokeDasharray={`${dash} ${circ - dash}`}
+              strokeLinecap="round"
+              style={{ transition: 'stroke-dasharray 0.8s ease, stroke 0.4s ease' }}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-4xl font-black text-white">{aiScore.score}</span>
+            <span className="text-xs text-gray-500 -mt-1">/ 100</span>
+          </div>
         </div>
+
+        {/* 등급 + 피드백 */}
+        <div className="flex-1 min-w-0">
+          <p className={cn('text-2xl font-extrabold mb-2', aiScore.gradeColor)}>{aiScore.grade}</p>
+          <div className="bg-gray-800/50 rounded-xl p-3 text-xs text-gray-300 leading-relaxed border border-gray-700/50">
+            💡 {aiScore.feedback}
+          </div>
+        </div>
+      </div>
+
+      {/* 점수 세부 분류 */}
+      <div className="mt-5 space-y-3">
+        {aiScore.breakdown.map(item => {
+          const pct = (item.points / item.maxPoints) * 100;
+          const barCol = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-rose-500';
+          return (
+            <div key={item.category}>
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs font-semibold text-gray-300">{item.category}</span>
+                <span className="text-xs font-bold text-gray-200">
+                  {item.points} <span className="text-gray-600">/ {item.maxPoints}</span>
+                </span>
+              </div>
+              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden mb-1">
+                <div className={cn('h-full rounded-full transition-all duration-700', barCol)}
+                  style={{ width: `${pct}%` }} />
+              </div>
+              <p className="text-[11px] text-gray-600 leading-relaxed">{item.reason}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 7. 주가 차트
+ * ───────────────────────────────────────────── */
+function PriceChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <h3 className="text-white font-bold text-base">주가 차트 + 이동평균선 (SMA)</h3>
+        <div className="flex items-center gap-4 text-xs">
+          {[
+            { color: 'bg-blue-400',   label: '종가' },
+            { color: 'bg-orange-400', label: 'SMA20' },
+            { color: 'bg-red-400',    label: 'SMA60' },
+          ].map(({ color, label }) => (
+            <span key={label} className="flex items-center gap-1.5">
+              <span className={cn('w-4 h-0.5 inline-block rounded', color)} />
+              <span className="text-gray-400">{label}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={300}>
+        <ComposedChart data={data.chartRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stopColor="#3b82f6" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.01} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1a2535" vertical={false} />
+          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false} interval={14} />
+          <YAxis tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
+            tickFormatter={(v: number) => `$${v}`} domain={['auto', 'auto']} width={62} />
+          <Tooltip content={<PriceTooltip />} />
+          <Area type="monotone" dataKey="close" fill="url(#priceGrad)" stroke="#3b82f6" strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="sma20" stroke="#f97316" strokeWidth={1.5} dot={false} connectNulls />
+          <Line type="monotone" dataKey="sma60" stroke="#f87171" strokeWidth={1.5} dot={false} connectNulls />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 8. RSI 차트
+ * ───────────────────────────────────────────── */
+function RSIChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
+  const rsiVal = data.latestRSI ?? 50;
+  const zone   = rsiVal >= 70 ? { t: '과매수', c: 'text-rose-400', b: 'bg-rose-500/10', bd: 'border-rose-500/30' }
+               : rsiVal <= 30 ? { t: '과매도', c: 'text-emerald-400', b: 'bg-emerald-500/10', bd: 'border-emerald-500/30' }
+               : { t: '중립', c: 'text-gray-300', b: 'bg-gray-700/30', bd: 'border-gray-600/30' };
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 className="text-white font-bold text-base">RSI <span className="text-gray-500 font-normal text-sm">(Wilder, 14)</span></h3>
+        <div className={cn('text-xs font-bold px-3 py-1 rounded-full border', zone.b, zone.bd, zone.c)}>
+          RSI {rsiVal.toFixed(1)} · {zone.t}
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={170}>
+        <ComposedChart data={data.chartRows} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1a2535" vertical={false} />
+          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false} interval={14} />
+          <YAxis domain={[0, 100]} tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
+            ticks={[0, 30, 50, 70, 100]} width={28} />
+          <Tooltip content={<RSITooltip />} />
+          <ReferenceArea y1={70} y2={100} fill="#ef4444" fillOpacity={0.07} />
+          <ReferenceArea y1={0}  y2={30}  fill="#10b981" fillOpacity={0.07} />
+          <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="4 3" strokeOpacity={0.5} />
+          <ReferenceLine y={30} stroke="#10b981" strokeDasharray="4 3" strokeOpacity={0.5} />
+          <ReferenceLine y={50} stroke="#374151" strokeDasharray="2 4" strokeOpacity={0.6} />
+          <Line type="monotone" dataKey="rsi" stroke="#a78bfa" strokeWidth={2} dot={false} connectNulls />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 9. MACD 차트
+ * ───────────────────────────────────────────── */
+function MACDChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 className="text-white font-bold text-base">MACD <span className="text-gray-500 font-normal text-sm">(12, 26, 9)</span></h3>
+        <div className="flex items-center gap-3 text-[11px]">
+          {[
+            { c: 'bg-blue-400',       l: 'MACD' },
+            { c: 'bg-orange-400',     l: 'Signal' },
+            { c: 'bg-emerald-400/60', l: 'Hist+' },
+            { c: 'bg-rose-400/60',    l: 'Hist-' },
+          ].map(({ c, l }) => (
+            <span key={l} className="flex items-center gap-1">
+              <span className={cn('w-3 h-2 rounded-sm inline-block', c)} />
+              <span className="text-gray-500">{l}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={170}>
+        <ComposedChart data={data.chartRows} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1a2535" vertical={false} />
+          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false} interval={14} />
+          <YAxis tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
+            width={50} tickFormatter={(v: number) => v.toFixed(1)} />
+          <Tooltip content={<MACDTooltip />} />
+          <ReferenceLine y={0} stroke="#374151" strokeOpacity={0.8} />
+          <Bar dataKey="histogram" maxBarSize={6} radius={[2, 2, 0, 0]}>
+            {data.chartRows.map((entry, idx) => (
+              <Cell key={idx} fill={(entry.histogram ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.75} />
+            ))}
+          </Bar>
+          <Line type="monotone" dataKey="macdLine"   stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls />
+          <Line type="monotone" dataKey="signalLine" stroke="#fb923c" strokeWidth={1.5} dot={false} connectNulls />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 10. 기업 프로필 카드
+ * ───────────────────────────────────────────── */
+function ProfileCard({ company }: { company: CompanyFundamentals }) {
+  const isPos  = company.changePercent >= 0;
+  const range  = company.week52High - company.week52Low;
+  const curPct = Math.round(((company.currentPrice - company.week52Low) / range) * 100);
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6">
+      <div className="flex flex-col lg:flex-row lg:items-start gap-6">
+        <div className="flex items-start gap-4 flex-1 min-w-0">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600/30 to-purple-600/30 border border-gray-700 flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-7 h-7 text-blue-400" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-bold text-white">{company.name}</h1>
+              <span className="text-xs text-blue-300 bg-blue-500/15 border border-blue-500/25 px-2 py-0.5 rounded-full font-semibold">{company.ticker}</span>
+              <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">{company.exchange}</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">{company.sector} · {company.industry}</p>
+            <p className="text-xs text-gray-600 mt-2 leading-relaxed max-w-2xl">{company.description}</p>
+          </div>
+        </div>
+        <div className="lg:text-right flex-shrink-0">
+          <div className="flex items-baseline gap-3 lg:justify-end">
+            <span className="text-4xl font-bold text-white tracking-tight">${company.currentPrice.toFixed(2)}</span>
+            <div className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold',
+              isPos ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/25')}>
+              {isPos ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+              {isPos ? '+' : ''}{company.change.toFixed(2)} ({isPos ? '+' : ''}{company.changePercent.toFixed(2)}%)
+            </div>
+          </div>
+          <div className="mt-3 lg:flex lg:flex-col lg:items-end">
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1.5 lg:justify-end">
+              <span>${company.week52Low}</span>
+              <span className="text-gray-600">52주 범위</span>
+              <span>${company.week52High}</span>
+            </div>
+            <div className="w-full lg:w-52 h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div className="h-full rounded-full bg-gradient-to-r from-rose-500 via-amber-500 to-emerald-500"
+                style={{ width: `${curPct}%` }} />
+            </div>
+            <p className="text-[11px] text-gray-600 mt-1">52주 범위의 {curPct}% 위치</p>
+          </div>
+        </div>
+      </div>
+      <div className="mt-5 pt-5 border-t border-gray-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: '시가총액', value: company.marketCap,              Icon: DollarSign, accent: 'text-blue-400' },
+          { label: 'P/E 비율', value: `${company.per}x`,             Icon: BarChart2,  accent: 'text-purple-400' },
+          { label: '거래량',   value: company.volume,                 Icon: Activity,   accent: 'text-emerald-400' },
+          { label: '임직원',   value: company.employees,              Icon: Users,      accent: 'text-amber-400' },
+        ].map(({ label, value, Icon, accent }) => (
+          <div key={label} className="flex items-center gap-3">
+            <div className={cn('w-9 h-9 rounded-xl bg-gray-800/70 flex items-center justify-center flex-shrink-0', accent)}>
+              <Icon className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[11px] text-gray-500">{label}</p>
+              <p className="text-sm font-bold text-white">{value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 섹션 구분선
+ * ───────────────────────────────────────────── */
+function SectionDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <p className="text-xs font-bold text-gray-500 uppercase tracking-widest whitespace-nowrap">{label}</p>
+      <div className="flex-1 h-px bg-gray-800" />
+      <ChevronRight className="w-3.5 h-3.5 text-gray-700 flex-shrink-0" />
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 11. 메인 페이지
+ * ───────────────────────────────────────────── */
+export default function StockDashboard() {
+  const [searchInput, setSearchInput]   = useState('AAPL');
+  const [activeTicker, setActiveTicker] = useState('AAPL');
+  const [activeTab, setActiveTab]       = useState<'fundamental' | 'technical'>('fundamental');
+  const [notFound, setNotFound]         = useState(false);
+  const [isLoading, setIsLoading]       = useState(false);
+
+  /* DCF 파라미터: 티커별 기본값, 사용자가 슬라이더로 조정 가능 */
+  const [dcfParams, setDcfParams] = useState<DCFUserParams>(() => {
+    const db = COMPANY_DB['AAPL'];
+    return { growthRate: db.defaultGrowthRate, discountRate: db.defaultWACC, terminalGrowthRate: db.defaultTerminalGrowth };
+  });
+
+  const company = COMPANY_DB[activeTicker];
+
+  /* 티커 변경 시 DCF 파라미터 리셋 */
+  const switchTicker = useCallback((t: string) => {
+    const db = COMPANY_DB[t];
+    if (!db) return;
+    setNotFound(false);
+    setIsLoading(true);
+    setDcfParams({ growthRate: db.defaultGrowthRate, discountRate: db.defaultWACC, terminalGrowthRate: db.defaultTerminalGrowth });
+    setTimeout(() => { setActiveTicker(t); setIsLoading(false); }, 420);
+  }, []);
+
+  const handleSearch = () => {
+    const t = searchInput.trim().toUpperCase();
+    if (COMPANY_DB[t]) switchTicker(t);
+    else setNotFound(true);
+  };
+
+  /* 차트 데이터 (메모이제이션) */
+  const chartData = useMemo(
+    () => GenerateMockData(activeTicker, START_PRICES[activeTicker] ?? 100),
+    [activeTicker],
+  );
+
+  const updateParam = useCallback((partial: Partial<DCFUserParams>) => {
+    setDcfParams(prev => ({ ...prev, ...partial }));
+  }, []);
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: '#060d1a', color: 'white' }}>
+
+      {/* ── HEADER ─────────────────────────────────── */}
+      <header style={{ borderBottom: '1px solid #1a2535', backgroundColor: 'rgba(6,13,26,0.92)' }}
+        className="sticky top-0 z-50 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
+              <BarChart2 className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-extrabold text-white text-lg tracking-tight">Stock-er</span>
+            <span className="hidden sm:inline-flex text-[11px] text-blue-300 border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 rounded-full font-medium">
+              AI 주가 분석
+            </span>
+          </div>
+
+          <div className="flex gap-2 flex-1 max-w-sm relative">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+              <input type="text" value={searchInput}
+                onChange={e => { setSearchInput(e.target.value.toUpperCase()); setNotFound(false); }}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                placeholder="티커 입력 (AAPL, TSLA…)"
+                className="w-full pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 rounded-xl border outline-none transition-colors"
+                style={{ backgroundColor: '#111827', borderColor: notFound ? '#f43f5e' : '#1f2d3d' }}
+              />
+            </div>
+            <button onClick={handleSearch}
+              className="px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0"
+              style={{ backgroundColor: '#2563eb' }}>
+              검색
+            </button>
+            {notFound && <p className="absolute top-full left-0 mt-1 text-xs text-rose-400">지원 티커: AAPL · TSLA · MSFT · GOOGL</p>}
+          </div>
+
+          <div className="flex gap-1.5 flex-wrap">
+            {Object.keys(COMPANY_DB).map(t => (
+              <button key={t} onClick={() => { setSearchInput(t); switchTicker(t); }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  backgroundColor: activeTicker === t ? '#2563eb' : '#111827',
+                  color: activeTicker === t ? 'white' : '#9ca3af',
+                  border: `1px solid ${activeTicker === t ? 'transparent' : '#1f2d3d'}`,
+                }}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* ── MAIN ───────────────────────────────────── */}
+      <main className={cn('max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5', isLoading && 'loading-shimmer')}>
+        <ProfileCard company={company} />
+
+        {/* 탭 네비게이션 */}
+        <div className="flex gap-1 p-1 rounded-2xl w-fit" style={{ backgroundColor: '#0d1929', border: '1px solid #1a2535' }}>
+          {[
+            { key: 'fundamental' as const, label: '📊  기업 펀더멘탈 분석' },
+            { key: 'technical'   as const, label: '📈  기술적 차트 분석' },
+          ].map(({ key, label }) => (
+            <button key={key} onClick={() => setActiveTab(key)}
+              className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all"
+              style={{
+                backgroundColor: activeTab === key ? '#2563eb' : 'transparent',
+                color: activeTab === key ? 'white' : '#6b7280',
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── 펀더멘탈 탭 ───────────────────────────── */}
+        {activeTab === 'fundamental' && (
+          <div className="space-y-5 tab-content">
+            <SectionDivider label="주요 투자 지표" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              <MetricCard label="PER (주가수익비율)" value={company.per} industryAvg={company.industryPer}
+                unit="x" description="낮을수록 이익 대비 저평가. 성장주는 업종 평균보다 높게 형성." higherIsBetter={false} />
+              <MetricCard label="PBR (주가순자산비율)" value={company.pbr} industryAvg={company.industryPbr}
+                unit="x" description="낮을수록 자산 대비 저평가. 1배 미만은 청산가치 이하를 의미." higherIsBetter={false} />
+              <MetricCard label="ROE (자기자본이익률)" value={company.roe} industryAvg={company.industryRoe}
+                unit="%" description="높을수록 자본 활용 효율 우수. 워런 버핏이 중요시하는 지표." higherIsBetter={true} isPercent={true} />
+              <MetricCard label="EV/EBITDA" value={company.evEbitda} industryAvg={company.industryEvEbitda}
+                unit="x" description="기업가치 대비 현금 창출력. M&A 가치평가에 활용되는 부채 중립 지표." higherIsBetter={false} />
+            </div>
+
+            <SectionDivider label="DCF 내재가치 분석 (실시간 계산)" />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+              <div className="lg:col-span-2">
+                <DCFGauge company={company} params={dcfParams} onParamChange={updateParam} />
+              </div>
+              <FinancialHealth company={company} />
+            </div>
+
+            <SectionDivider label="AI 종합 투자 매력도" />
+            <AIScoreWidget company={company} params={dcfParams} chartData={chartData} />
+          </div>
+        )}
+
+        {/* ── 기술적 차트 탭 ─────────────────────────── */}
+        {activeTab === 'technical' && (
+          <div className="space-y-5 tab-content">
+            <SectionDivider label="AI 종합 투자 매력도" />
+            <AIScoreWidget company={company} params={dcfParams} chartData={chartData} />
+
+            <SectionDivider label="주가 차트 (SMA20 · SMA60)" />
+            <PriceChart data={chartData} />
+
+            <SectionDivider label="보조지표 (RSI · MACD)" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <RSIChart  data={chartData} />
+              <MACDChart data={chartData} />
+            </div>
+          </div>
+        )}
       </main>
+
+      <footer className="mt-12 py-6 text-center" style={{ borderTop: '1px solid #1a2535' }}>
+        <p className="text-xs text-gray-700">
+          Stock-er · 교육 목적 Mock 데이터 사용 — 실제 투자 결정에 활용하지 마세요.
+        </p>
+      </footer>
+
+      {/* ── QA 하네스 모니터 (플로팅) ─────────── */}
+      <QAHarnessMonitor />
     </div>
   );
 }
