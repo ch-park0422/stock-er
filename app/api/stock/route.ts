@@ -208,7 +208,10 @@ function mapAV(
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * ② FINNHUB  (Alpha Vantage 사용량 초과 / 오류 시 자동 전환)
+ * ② FINNHUB (현재가 + 펀더멘털)  +  Yahoo Finance (OHLCV 차트)
+ *
+ * Finnhub 무료 플랜은 /stock/candle을 지원하지 않음(403).
+ * 대신 Yahoo Finance 비공식 차트 API(키 불필요)로 OHLCV를 조회한다.
  * ═══════════════════════════════════════════════════════════════════════ */
 const FH = 'https://finnhub.io/api/v1';
 
@@ -221,11 +224,6 @@ interface FHQuote {
   o: number;   // day open
   pc: number;  // previous close
   t: number;   // timestamp
-}
-interface FHCandle {
-  c?: number[]; h?: number[]; l?: number[]; o?: number[];
-  t?: number[]; v?: number[];
-  s: string;   // 'ok' | 'no_data'
 }
 interface FHProfile {
   name?: string;
@@ -258,6 +256,25 @@ interface FHMetric {
   };
 }
 
+/** Yahoo Finance 차트 API 응답 */
+interface YFChartResponse {
+  chart: {
+    result?: Array<{
+      timestamp: number[];
+      indicators: {
+        quote: Array<{
+          open:   (number | null)[];
+          high:   (number | null)[];
+          low:    (number | null)[];
+          close:  (number | null)[];
+          volume: (number | null)[];
+        }>;
+      };
+    }>;
+    error?: { code: string; description: string } | null;
+  };
+}
+
 async function fhFetch<T>(path: string, key: string, revalidate = 300): Promise<T> {
   const sep = path.includes('?') ? '&' : '?';
   const url = `${FH}${path}${sep}token=${key}`;
@@ -269,40 +286,58 @@ async function fhFetch<T>(path: string, key: string, revalidate = 300): Promise<
   return d;
 }
 
+/** Yahoo Finance: 최근 6개월 일봉 (키 불필요, 무료) */
+async function fetchYFCandles(ticker: string): Promise<{
+  date: string; open: number; high: number; low: number; close: number; volume: number;
+}[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=6mo`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    next: { revalidate: 300 },
+  });
+  if (!res.ok) throw new Error(`YF HTTP ${res.status}`);
+  const data: YFChartResponse = await res.json();
+  const result = data.chart.result?.[0];
+  if (!result) throw new Error('YF: 데이터 없음');
+
+  const { timestamp, indicators } = result;
+  const q = indicators.quote[0];
+
+  return timestamp
+    .map((ts, i) => {
+      const d  = new Date(ts * 1000);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return {
+        date:   `${mm}/${dd}`,
+        open:   Math.round((q.open[i]   ?? 0) * 100) / 100,
+        high:   Math.round((q.high[i]   ?? 0) * 100) / 100,
+        low:    Math.round((q.low[i]    ?? 0) * 100) / 100,
+        close:  Math.round((q.close[i]  ?? 0) * 100) / 100,
+        volume: Math.round(q.volume[i]  ?? 0),
+      };
+    })
+    .filter(b => b.close > 0);
+}
+
 function mapFinnhub(
   ticker: string,
   quote: FHQuote,
-  candle: FHCandle,
+  yfBars: { date: string; open: number; high: number; low: number; close: number; volume: number }[],
   profile: FHProfile,
   metrics: FHMetric,
   fb: CompanyFundamentals | undefined,
   avErr: string,
+  isAvFallback: boolean,
 ): StockData {
-  if (candle.s !== 'ok' || !candle.c?.length) {
-    throw new Error('FH: candle data 없음');
-  }
+  if (!yfBars.length) throw new Error('YF: 차트 데이터 없음');
 
-  const len  = candle.c.length;
-  const bars = Array.from({ length: len }, (_, i) => {
-    const d = new Date((candle.t![i]) * 1000);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return {
-      date:   `${mm}/${dd}`,
-      open:   Math.round((candle.o![i]) * 100) / 100,
-      high:   Math.round((candle.h![i]) * 100) / 100,
-      low:    Math.round((candle.l![i]) * 100) / 100,
-      close:  Math.round((candle.c![i]) * 100) / 100,
-      volume: Math.round(candle.v![i] ?? 0),
-    };
-  });
-
-  const { rows: allRows, allCloses } = buildChartRows(bars);
+  const { rows: allRows, allCloses } = buildChartRows(yfBars);
   const lastIdx = allRows.length - 1;
   const m = metrics.metric;
 
-  // Finnhub quote의 현재가 사용 (캔들 마지막 값보다 최신)
-  const currentPrice = quote.c > 0 ? quote.c : bars[bars.length - 1].close;
+  // Finnhub quote의 현재가 사용 (Yahoo 마지막 봉보다 최신)
+  const currentPrice = quote.c > 0 ? quote.c : yfBars[yfBars.length - 1].close;
   const change       = Math.round(quote.d * 100) / 100;
   const changePct    = Math.round(quote.dp * 100) / 100;
 
@@ -331,7 +366,7 @@ function mapFinnhub(
     currentPrice,
     change,
     changePercent: changePct,
-    volume:    fmtVol(bars[bars.length - 1].volume),
+    volume:    fmtVol(yfBars[yfBars.length - 1].volume),
     marketCap: capMillions > 0 ? fmtCap(capMillions * 1e6) : (fb?.marketCap ?? 'N/A'),
     week52High: w52h,
     week52Low:  w52l,
@@ -363,24 +398,30 @@ function mapFinnhub(
     source:    'live',
     provider:  'finnhub',
     fetchedAt: new Date().toISOString(),
-    note:      `Alpha Vantage 사용량 초과 (${avErr}). Finnhub 실시간 데이터로 자동 전환됨.`,
+    note:      isAvFallback
+      ? `Alpha Vantage 사용량 초과 (${avErr}). Finnhub + Yahoo Finance 데이터로 자동 전환됨.`
+      : undefined,
   };
 }
 
-/* Finnhub 4개 엔드포인트 병렬 호출 */
-async function fetchFromFinnhub(ticker: string, key: string, avErr: string, fb: CompanyFundamentals | undefined): Promise<StockData> {
-  // 캔들: 최근 ~150 캘린더일 (≈100 거래일)
-  const to   = Math.floor(Date.now() / 1000);
-  const from = to - 150 * 24 * 60 * 60;
-
-  const [quote, candle, profile, metrics] = await Promise.all([
+/**
+ * Finnhub(현재가·펀더멘털) + Yahoo Finance(OHLCV 차트) 병렬 호출
+ */
+async function fetchFromFinnhub(
+  ticker: string,
+  key: string,
+  avErr: string,
+  fb: CompanyFundamentals | undefined,
+  isAvFallback: boolean,
+): Promise<StockData> {
+  const [quote, yfBars, profile, metrics] = await Promise.all([
     fhFetch<FHQuote>(`/quote?symbol=${encodeURIComponent(ticker)}`, key, 60),
-    fhFetch<FHCandle>(`/stock/candle?symbol=${encodeURIComponent(ticker)}&resolution=D&from=${from}&to=${to}`, key, 300),
+    fetchYFCandles(ticker),
     fhFetch<FHProfile>(`/stock/profile2?symbol=${encodeURIComponent(ticker)}`, key, 3600),
     fhFetch<FHMetric>(`/stock/metric?symbol=${encodeURIComponent(ticker)}&metric=all`, key, 3600),
   ]);
 
-  return mapFinnhub(ticker, quote, candle, profile, metrics, fb, avErr);
+  return mapFinnhub(ticker, quote, yfBars, profile, metrics, fb, avErr, isAvFallback);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -452,7 +493,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       /* ── 2순위: Finnhub (AV 한도 초과 or 오류) ── */
       if (fhKey && fhKey !== 'your_finnhub_key_here') {
         try {
-          const data = await fetchFromFinnhub(ticker, fhKey, avMsg, fb);
+          const data = await fetchFromFinnhub(ticker, fhKey, avMsg, fb, true);
           return Response.json(data, {
             headers: { 'Cache-Control': `public, max-age=${isRateLimit ? 60 : 30}, stale-while-revalidate=120` },
           });
@@ -477,10 +518,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   /* ── AV 키 없고 Finnhub 키만 있는 경우 ─── */
   if (fhKey && fhKey !== 'your_finnhub_key_here') {
     try {
-      const data = await fetchFromFinnhub(ticker, fhKey, 'AV 키 없음', fb);
-      // note 제거 (AV 오류가 아니므로)
+      const data = await fetchFromFinnhub(ticker, fhKey, '', fb, false);
       return Response.json(
-        { ...data, note: undefined, provider: 'finnhub' as const },
+        data,
         { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=120' } },
       );
     } catch (fhErr) {
