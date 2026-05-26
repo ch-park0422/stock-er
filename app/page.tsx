@@ -4,8 +4,8 @@
  * app/page.tsx
  * 메인 대시보드 — 실시간 주식 분석 (API 연동)
  *
- * /api/stock?ticker={ticker} 를 호출하여 데이터를 받아오며,
- * API 키 미설정 시 Mock 데이터로 자동 폴백됩니다.
+ * /api/stock?ticker={ticker} 를 호출하여 실시간 데이터를 받아옵니다.
+ * API 호출 실패 시 Mock 폴백 없이 에러 화면을 표시합니다.
  */
 
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
@@ -19,7 +19,7 @@ import {
   Search, TrendingUp, TrendingDown, Building2, Users,
   Activity, DollarSign, BarChart2, Target, ArrowUpRight,
   ArrowDownRight, Zap, ChevronRight, SlidersHorizontal,
-  Info, FlaskConical, Wifi, WifiOff, RefreshCw,
+  Info, FlaskConical, WifiOff, RefreshCw, ServerCrash,
 } from 'lucide-react';
 
 /* ── 분석 라이브러리 ─────────────────────────── */
@@ -557,9 +557,8 @@ function MACDChart({ data }: { data: MockDataResult }) {
 /* ─────────────────────────────────────────────
  * 10. 기업 프로필 카드
  * ───────────────────────────────────────────── */
-function ProfileCard({ company, source, note, onRefresh, isLoading }: {
+function ProfileCard({ company, note, onRefresh, isLoading }: {
   company: CompanyFundamentals;
-  source: 'live' | 'mock';
   note?: string;
   onRefresh: () => void;
   isLoading: boolean;
@@ -588,17 +587,6 @@ function ProfileCard({ company, source, note, onRefresh, isLoading }: {
               <h1 className="text-xl font-bold text-white">{company.name}</h1>
               <span className="text-xs text-blue-300 bg-blue-500/15 border border-blue-500/25 px-2 py-0.5 rounded-full font-semibold">{company.ticker}</span>
               <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">{company.exchange}</span>
-              {/* 데이터 소스 뱃지 */}
-              <span className={cn(
-                'text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-medium',
-                source === 'live'
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                  : 'bg-slate-500/10 text-slate-400 border border-slate-500/20',
-              )}>
-                {source === 'live'
-                  ? <><Wifi className="w-2.5 h-2.5" /> LIVE</>
-                  : <><WifiOff className="w-2.5 h-2.5" /> MOCK</>}
-              </span>
             </div>
             <p className="text-xs text-gray-500 mt-1">{company.sector} · {company.industry}</p>
             <p className="text-xs text-gray-600 mt-2 leading-relaxed max-w-2xl">{company.description}</p>
@@ -698,25 +686,32 @@ function LoadingScreen({ ticker }: { ticker: string }) {
 }
 
 /* ─────────────────────────────────────────────
- * 13. 에러 화면
+ * 13. 에러 화면 (API 호출 불가)
  * ───────────────────────────────────────────── */
 function ErrorScreen({ ticker, message, onRetry }: {
   ticker: string; message: string; onRetry: () => void;
 }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-5" style={{ backgroundColor: '#060d1a' }}>
-      <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center">
-        <TrendingDown className="w-8 h-8 text-rose-400" />
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6" style={{ backgroundColor: '#060d1a' }}>
+      <div className="w-20 h-20 rounded-3xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+        <ServerCrash className="w-10 h-10 text-rose-400" />
       </div>
-      <div className="text-center max-w-sm">
-        <p className="text-white font-bold text-lg">데이터 불러오기 실패</p>
-        <p className="text-gray-500 text-sm mt-1">티커: <span className="text-gray-300">{ticker}</span></p>
-        <p className="text-rose-400/80 text-xs mt-2 font-mono bg-rose-500/5 border border-rose-500/10 rounded-lg px-3 py-2">
-          {message}
+      <div className="text-center max-w-md px-4">
+        <p className="text-white font-extrabold text-2xl tracking-tight">API 호출 불가</p>
+        <p className="text-gray-400 text-sm mt-2">
+          <span className="text-gray-200 font-semibold">{ticker}</span> 데이터를 불러올 수 없습니다.
+        </p>
+        <div className="mt-4 bg-gray-900/80 border border-gray-800 rounded-2xl px-5 py-4 text-left space-y-1">
+          <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">오류 상세</p>
+          <p className="text-rose-400/90 text-xs font-mono leading-relaxed break-all">{message}</p>
+        </div>
+        <p className="text-gray-600 text-xs mt-4 leading-relaxed">
+          API 키를 확인하거나 잠시 후 다시 시도해 주세요.<br />
+          (<span className="text-gray-500">.env.local → STOCK_API_KEY / FINNHUB_API_KEY</span>)
         </p>
       </div>
       <button onClick={onRetry}
-        className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold text-white transition-colors">
+        className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 rounded-xl text-sm font-semibold text-white transition-colors shadow-lg shadow-blue-500/20">
         <RefreshCw className="w-4 h-4" />
         다시 시도
       </button>
@@ -885,7 +880,6 @@ export default function StockDashboard() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
         <ProfileCard
           company={company}
-          source={stockData.source}
           note={stockData.note}
           onRefresh={() => fetchStockData(activeTicker)}
           isLoading={isLoading}
@@ -956,7 +950,7 @@ export default function StockDashboard() {
 
       <footer className="mt-12 py-6 text-center" style={{ borderTop: '1px solid #1a2535' }}>
         <p className="text-xs text-gray-700">
-          Stock-er · {stockData.source === 'live' ? '실시간 Alpha Vantage 데이터' : '교육 목적 Mock 데이터'} — 실제 투자 결정에 활용하지 마세요. ·{' '}
+          Stock-er · 실시간 시장 데이터 (Alpha Vantage / Finnhub) — 실제 투자 결정에 활용하지 마세요. ·{' '}
           <Link href="/admin/test-harness" className="hover:text-gray-500 transition-colors underline">
             QA 테스트 하네스
           </Link>

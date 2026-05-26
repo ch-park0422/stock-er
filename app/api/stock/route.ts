@@ -17,8 +17,6 @@
 import type { NextRequest } from 'next/server';
 import {
   COMPANY_DB,
-  GenerateMockData,
-  START_PRICES,
   type CompanyFundamentals,
   type ChartRow,
 } from '@/lib/mockData';
@@ -425,33 +423,6 @@ async function fetchFromFinnhub(
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * ③ Mock 폴백
- * ═══════════════════════════════════════════════════════════════════════ */
-function buildMockData(ticker: string, note?: string): StockData {
-  const fb   = COMPANY_DB[ticker];
-  const mock = GenerateMockData(ticker, START_PRICES[ticker] ?? 100);
-
-  if (!fb) {
-    const closes = mock.allPrices;
-    const base: CompanyFundamentals = {
-      ticker, name: ticker, sector: 'N/A', industry: 'N/A', exchange: 'N/A',
-      employees: 'N/A', description: `"${ticker}" Mock 데이터.`,
-      currentPrice: closes.at(-1) ?? 100, change: 0, changePercent: 0,
-      volume: 'N/A', marketCap: 'N/A',
-      week52High: Math.max(...closes), week52Low: Math.min(...closes),
-      fcf: 1_000, shares: 100, netDebt: 0,
-      defaultGrowthRate: 0.08, defaultWACC: 0.09, defaultTerminalGrowth: 0.03,
-      per: 20, industryPer: 20, pbr: 3, industryPbr: 3,
-      roe: 15, industryRoe: 15, evEbitda: 15, industryEvEbitda: 15,
-      dividendYield: 0, debtToEquity: 0.5, currentRatio: 1.5,
-      grossMargin: 30, operatingMargin: 15, netMargin: 10,
-    };
-    return { ...base, ...mock, source: 'mock', provider: 'mock', fetchedAt: new Date().toISOString(), note };
-  }
-  return { ...fb, ...mock, source: 'mock', provider: 'mock', fetchedAt: new Date().toISOString(), note };
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
  * Route Handler
  * ═══════════════════════════════════════════════════════════════════════ */
 export async function GET(request: NextRequest): Promise<Response> {
@@ -468,11 +439,11 @@ export async function GET(request: NextRequest): Promise<Response> {
   const avKey = process.env.STOCK_API_KEY;
   const fhKey = process.env.FINNHUB_API_KEY;
 
-  /* ── 키 없음 → Mock ──────────────────────── */
+  /* ── 키 없음 → 에러 ──────────────────────── */
   if ((!avKey || avKey === 'your_api_key_here') && (!fhKey || fhKey === 'your_finnhub_key_here')) {
     return Response.json(
-      buildMockData(ticker, 'API 키가 설정되지 않았습니다. Mock 데이터를 표시합니다.'),
-      { headers: { 'Cache-Control': 'public, max-age=60' } },
+      { error: 'API 키가 설정되지 않았습니다. .env.local에 STOCK_API_KEY 또는 FINNHUB_API_KEY를 추가해 주세요.', ticker, fetchedAt: new Date().toISOString() },
+      { status: 503 },
     );
   }
 
@@ -499,18 +470,17 @@ export async function GET(request: NextRequest): Promise<Response> {
           });
         } catch (fhErr) {
           const fhMsg = fhErr instanceof Error ? fhErr.message : String(fhErr);
-          /* ── 3순위: Mock ─────────────────────── */
           return Response.json(
-            buildMockData(ticker, `AV 실패(${avMsg}), Finnhub 실패(${fhMsg}). Mock 폴백.`),
-            { headers: { 'Cache-Control': 'public, max-age=30' } },
+            { error: `Alpha Vantage 실패(${avMsg}), Finnhub 실패(${fhMsg}). 잠시 후 다시 시도해 주세요.`, ticker, fetchedAt: new Date().toISOString() },
+            { status: 503 },
           );
         }
       }
 
-      /* AV 실패 + Finnhub 키 없음 → Mock */
+      /* AV 실패 + Finnhub 키 없음 → 에러 */
       return Response.json(
-        buildMockData(ticker, `Alpha Vantage 실패(${avMsg}). FINNHUB_API_KEY를 설정하면 자동 전환됩니다.`),
-        { headers: { 'Cache-Control': 'public, max-age=30' } },
+        { error: `Alpha Vantage 호출 실패(${avMsg}). FINNHUB_API_KEY를 .env.local에 추가하면 자동 전환됩니다.`, ticker, fetchedAt: new Date().toISOString() },
+        { status: 503 },
       );
     }
   }
@@ -526,11 +496,15 @@ export async function GET(request: NextRequest): Promise<Response> {
     } catch (fhErr) {
       const fhMsg = fhErr instanceof Error ? fhErr.message : String(fhErr);
       return Response.json(
-        buildMockData(ticker, `Finnhub 실패(${fhMsg}). Mock 폴백.`),
-        { headers: { 'Cache-Control': 'public, max-age=30' } },
+        { error: `Finnhub 호출 실패(${fhMsg}). 잠시 후 다시 시도해 주세요.`, ticker, fetchedAt: new Date().toISOString() },
+        { status: 503 },
       );
     }
   }
 
-  return Response.json(buildMockData(ticker));
+  /* 도달 불가 — 방어용 */
+  return Response.json(
+    { error: '알 수 없는 오류가 발생했습니다.', ticker, fetchedAt: new Date().toISOString() },
+    { status: 500 },
+  );
 }
