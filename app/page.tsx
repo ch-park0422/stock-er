@@ -19,7 +19,7 @@ import {
   Search, TrendingUp, TrendingDown, Building2, Users,
   Activity, DollarSign, BarChart2, Target, ArrowUpRight,
   ArrowDownRight, Zap, ChevronRight, SlidersHorizontal,
-  Info, FlaskConical, WifiOff, RefreshCw, ServerCrash,
+  Info, FlaskConical, WifiOff, RefreshCw, ServerCrash, X,
 } from 'lucide-react';
 
 /* ── 분석 라이브러리 ─────────────────────────── */
@@ -725,6 +725,7 @@ function ErrorScreen({ ticker, message, onRetry }: {
 export default function StockDashboard() {
   const [searchInput, setSearchInput] = useState('AAPL');
   const [activeTab, setActiveTab]     = useState<'fundamental' | 'technical'>('fundamental');
+  const [bannerVisible, setBannerVisible] = useState(true);
 
   /* ── API 데이터 상태 ─────────────────────── */
   const [stockData, setStockData] = useState<StockData | null>(null);
@@ -867,6 +868,35 @@ export default function StockDashboard() {
           </Link>
         </div>
       </header>
+
+      {/* ── 면책조항 안내 배너 ── */}
+      {bannerVisible && (
+        <div
+          className="w-full flex items-center gap-2 px-4 sm:px-6 py-2.5"
+          style={{
+            backgroundColor: 'rgba(120, 53, 15, 0.25)',
+            borderBottom: '1px solid rgba(217, 119, 6, 0.25)',
+          }}
+        >
+          <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
+          <p className="text-amber-200/80 text-xs sm:text-sm flex-1 min-w-0 leading-snug">
+            본 서비스는 투자 편의를 위한 분석 시스템으로, 투자 결과에 대한 책임을 지지 않습니다.{' '}
+            <Link
+              href="/about"
+              className="text-amber-300 font-semibold underline underline-offset-2 decoration-amber-500/50 hover:text-amber-100 hover:decoration-amber-300 transition-colors whitespace-nowrap"
+            >
+              서비스 분석 기준 및 면책조항 보기 →
+            </Link>
+          </p>
+          <button
+            onClick={() => setBannerVisible(false)}
+            aria-label="배너 닫기"
+            className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-amber-500/70 hover:text-amber-300 hover:bg-amber-500/15 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* ── 로딩 오버레이 (데이터 있을 때 전환 중) ── */}
       {isLoading && stockData && (
