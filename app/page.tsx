@@ -1,6 +1,15 @@
 'use client';
 
-import React, { useState, useMemo, useCallback } from 'react';
+/**
+ * app/page.tsx
+ * 메인 대시보드 — 실시간 주식 분석 (API 연동)
+ *
+ * /api/stock?ticker={ticker} 를 호출하여 데이터를 받아오며,
+ * API 키 미설정 시 Mock 데이터로 자동 폴백됩니다.
+ */
+
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import Link from 'next/link';
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea,
@@ -9,8 +18,8 @@ import {
 import {
   Search, TrendingUp, TrendingDown, Building2, Users,
   Activity, DollarSign, BarChart2, Target, ArrowUpRight,
-  ArrowDownRight, Minus, Zap, ChevronRight, SlidersHorizontal,
-  Info,
+  ArrowDownRight, Zap, ChevronRight, SlidersHorizontal,
+  Info, FlaskConical, Wifi, WifiOff, RefreshCw,
 } from 'lucide-react';
 
 /* ── 분석 라이브러리 ─────────────────────────── */
@@ -18,13 +27,13 @@ import {
   calculateDCF, getValuationLabel, calculateAIScore,
   detectMACross,
 } from '@/lib/analysis';
-import {
-  COMPANY_DB, GenerateMockData, START_PRICES,
-  type CompanyFundamentals,
-} from '@/lib/mockData';
+import type { CompanyFundamentals, MockDataResult } from '@/lib/mockData';
+import type { StockData } from '@/lib/types';
 
-/* ── QA 하네스 모니터 ───────────────────────── */
-import QAHarnessMonitor from '@/app/components/QAHarnessMonitor';
+/* ─────────────────────────────────────────────
+ * 빠른 접근 티커 목록 (고정)
+ * ───────────────────────────────────────────── */
+const QUICK_TICKERS = ['AAPL', 'TSLA', 'MSFT', 'GOOGL'];
 
 /* ─────────────────────────────────────────────
  * 0. 유틸
@@ -38,9 +47,9 @@ function fmt(n: number, d = 2) { return n.toFixed(d); }
  * DCF 파라미터 상태 타입
  * ───────────────────────────────────────────── */
 interface DCFUserParams {
-  growthRate: number;       // 0.01 – 0.40
-  discountRate: number;     // 0.05 – 0.15
-  terminalGrowthRate: number; // 0.00 – 0.05
+  growthRate: number;
+  discountRate: number;
+  terminalGrowthRate: number;
 }
 
 /* ─────────────────────────────────────────────
@@ -99,13 +108,11 @@ const MACDTooltip = ({ active, payload, label }: { active?: boolean; payload?: T
 };
 
 /* ─────────────────────────────────────────────
- * 2. DCF 파라미터 슬라이더 패널
+ * 2. DCF 파라미터 슬라이더
  * ───────────────────────────────────────────── */
 interface SliderProps {
-  label: string;
-  sub: string;
-  value: number;
-  min: number; max: number; step: number;
+  label: string; sub: string;
+  value: number; min: number; max: number; step: number;
   format: (v: number) => string;
   onChange: (v: number) => void;
   color: string;
@@ -122,15 +129,10 @@ function ParamSlider({ label, sub, value, min, max, step, format, onChange, colo
         <span className={cn('text-sm font-bold', color)}>{format(value)}</span>
       </div>
       <div className="relative h-2 bg-gray-800 rounded-full">
-        <div
-          className={cn('absolute h-full rounded-full', color.replace('text-', 'bg-'))}
-          style={{ width: `${pct}%` }}
-        />
-        <input
-          type="range" min={min} max={max} step={step} value={value}
+        <div className={cn('absolute h-full rounded-full', color.replace('text-', 'bg-'))} style={{ width: `${pct}%` }} />
+        <input type="range" min={min} max={max} step={step} value={value}
           onChange={e => onChange(parseFloat(e.target.value))}
-          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
-        />
+          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full" />
       </div>
       <div className="flex justify-between text-[10px] text-gray-700 mt-1">
         <span>{format(min)}</span><span>{format(max)}</span>
@@ -149,26 +151,20 @@ interface DCFGaugeProps {
 }
 function DCFGauge({ company, params, onParamChange }: DCFGaugeProps) {
   const dcfResult = useMemo(() => calculateDCF({
-    fcf: company.fcf,
-    shares: company.shares,
-    netDebt: company.netDebt,
-    growthRate: params.growthRate,
-    discountRate: params.discountRate,
+    fcf: company.fcf, shares: company.shares, netDebt: company.netDebt,
+    growthRate: params.growthRate, discountRate: params.discountRate,
     terminalGrowthRate: params.terminalGrowthRate,
   }), [company, params]);
 
   const fairValue = dcfResult.fairValuePerShare;
   const valuation = getValuationLabel(fairValue, company.currentPrice);
-
   const bearVal = fairValue * 0.70;
   const bullVal = fairValue * 1.40;
   const range   = bullVal - bearVal;
   const curPos  = Math.min(Math.max(((company.currentPrice - bearVal) / range) * 100, 2), 97);
-  const fairPos = 50; // 적정가는 항상 중앙
 
   return (
     <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6 h-full flex flex-col">
-      {/* 헤더 */}
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="text-white font-bold text-base flex items-center gap-2">
@@ -178,19 +174,15 @@ function DCFGauge({ company, params, onParamChange }: DCFGaugeProps) {
           <p className="text-xs text-gray-500 mt-0.5">현금흐름할인(DCF) 모델 · 슬라이더로 가정치 조정</p>
         </div>
         <div className={cn('px-3 py-1.5 rounded-xl text-sm font-bold border', valuation.bgColor, valuation.borderColor, valuation.color)}>
-          {valuation.upsidePct > 0 ? '▲' : '▼'} {Math.abs(valuation.upsidePct).toFixed(1)}%&nbsp;
-          {valuation.label}
+          {valuation.upsidePct > 0 ? '▲' : '▼'} {Math.abs(valuation.upsidePct).toFixed(1)}% {valuation.label}
         </div>
       </div>
 
-      {/* 게이지 */}
       <div className="relative mt-8 mb-12">
         <div className="h-7 rounded-full bg-gradient-to-r from-rose-600/80 via-amber-500/80 to-emerald-500/80 relative overflow-visible shadow-inner">
           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-white/60 font-medium select-none">저평가</span>
           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-white/60 font-medium select-none">고평가</span>
-
-          {/* 적정가 마커 (중앙 50%) */}
-          <div className="absolute top-0 bottom-0 flex flex-col items-center" style={{ left: `${fairPos}%` }}>
+          <div className="absolute top-0 bottom-0 flex flex-col items-center" style={{ left: '50%' }}>
             <div className="absolute -top-7 transform -translate-x-1/2 whitespace-nowrap">
               <span className="text-[11px] font-bold text-yellow-300 bg-yellow-500/20 border border-yellow-500/40 px-2 py-0.5 rounded-full">
                 적정 ${fmt(fairValue)}
@@ -199,8 +191,6 @@ function DCFGauge({ company, params, onParamChange }: DCFGaugeProps) {
             <div className="w-0.5 h-full bg-yellow-300/80" />
             <div className="absolute -bottom-2 w-2.5 h-2.5 bg-yellow-300 rounded-full transform -translate-x-1/2" style={{ left: '50%' }} />
           </div>
-
-          {/* 현재가 마커 */}
           <div className="absolute top-0 bottom-0" style={{ left: `${curPos}%` }}>
             <div className="w-1 h-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
             <div className="absolute -bottom-9 transform -translate-x-1/2 whitespace-nowrap" style={{ left: '50%' }}>
@@ -212,7 +202,6 @@ function DCFGauge({ company, params, onParamChange }: DCFGaugeProps) {
         </div>
       </div>
 
-      {/* 수치 요약 */}
       <div className="grid grid-cols-3 gap-2 mb-5">
         {[
           { l: '🐻 Bear (-30%)', v: `$${fmt(bearVal)}`,              c: 'text-rose-400' },
@@ -226,7 +215,6 @@ function DCFGauge({ company, params, onParamChange }: DCFGaugeProps) {
         ))}
       </div>
 
-      {/* DCF 세부 지표 */}
       <div className="grid grid-cols-3 gap-2 mb-5 text-center">
         {[
           { l: 'PV of FCFs',     v: `$${(dcfResult.pvOfFCFs / 1000).toFixed(1)}B` },
@@ -240,43 +228,31 @@ function DCFGauge({ company, params, onParamChange }: DCFGaugeProps) {
         ))}
       </div>
 
-      {/* ─── 슬라이더 패널 ─── */}
       <div className="border-t border-gray-800 pt-4 space-y-4">
         <div className="flex items-center gap-2 mb-3">
           <SlidersHorizontal className="w-3.5 h-3.5 text-blue-400" />
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">DCF 가정치 조정</span>
-          <button
-            className="ml-auto text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+          <button className="ml-auto text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
             onClick={() => onParamChange({
               growthRate: company.defaultGrowthRate,
               discountRate: company.defaultWACC,
               terminalGrowthRate: company.defaultTerminalGrowth,
-            })}
-          >
+            })}>
             ↺ 기본값
           </button>
         </div>
-        <ParamSlider
-          label="FCF 성장률" sub="예상 연간 잉여현금흐름 성장률"
+        <ParamSlider label="FCF 성장률" sub="예상 연간 잉여현금흐름 성장률"
           value={params.growthRate} min={0.01} max={0.40} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
-          onChange={v => onParamChange({ growthRate: v })}
-          color="text-blue-400"
-        />
-        <ParamSlider
-          label="할인율 (WACC)" sub="가중평균자본비용"
+          onChange={v => onParamChange({ growthRate: v })} color="text-blue-400" />
+        <ParamSlider label="할인율 (WACC)" sub="가중평균자본비용"
           value={params.discountRate} min={0.05} max={0.15} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
-          onChange={v => onParamChange({ discountRate: v })}
-          color="text-purple-400"
-        />
-        <ParamSlider
-          label="영구 성장률" sub="터미널 밸류 영구 성장 가정"
+          onChange={v => onParamChange({ discountRate: v })} color="text-purple-400" />
+        <ParamSlider label="영구 성장률" sub="터미널 밸류 영구 성장 가정"
           value={params.terminalGrowthRate} min={0.005} max={0.05} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
-          onChange={v => onParamChange({ terminalGrowthRate: v })}
-          color="text-amber-400"
-        />
+          onChange={v => onParamChange({ terminalGrowthRate: v })} color="text-amber-400" />
       </div>
     </div>
   );
@@ -302,11 +278,9 @@ function MetricCard({ label, value, industryAvg, unit, description, higherIsBett
           <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold">{label}</p>
           <p className="text-3xl font-bold text-white mt-1.5 leading-none">{display}</p>
         </div>
-        <span className={cn(
-          'text-[11px] px-2.5 py-1 rounded-full font-bold',
+        <span className={cn('text-[11px] px-2.5 py-1 rounded-full font-bold',
           isGood ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
-                 : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
-        )}>
+                 : 'bg-rose-500/15 text-rose-400 border border-rose-500/20')}>
           {isGood ? '양호' : '주의'}
         </span>
       </div>
@@ -338,9 +312,9 @@ function MetricCard({ label, value, industryAvg, unit, description, higherIsBett
 function FinancialHealth({ company }: { company: CompanyFundamentals }) {
   const f = company;
   const margins = [
-    { label: '매출총이익률',  value: f.grossMargin,     grad: 'from-blue-500 to-blue-400',     text: 'text-blue-400' },
-    { label: '영업이익률',    value: f.operatingMargin, grad: 'from-purple-500 to-purple-400', text: 'text-purple-400' },
-    { label: '순이익률',      value: f.netMargin,       grad: 'from-emerald-500 to-emerald-400', text: 'text-emerald-400' },
+    { label: '매출총이익률', value: f.grossMargin,     grad: 'from-blue-500 to-blue-400',     text: 'text-blue-400' },
+    { label: '영업이익률',   value: f.operatingMargin, grad: 'from-purple-500 to-purple-400', text: 'text-purple-400' },
+    { label: '순이익률',     value: f.netMargin,       grad: 'from-emerald-500 to-emerald-400', text: 'text-emerald-400' },
   ];
   return (
     <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5 h-full flex flex-col">
@@ -384,27 +358,20 @@ function FinancialHealth({ company }: { company: CompanyFundamentals }) {
 function AIScoreWidget({ company, params, chartData }: {
   company: CompanyFundamentals;
   params: DCFUserParams;
-  chartData: ReturnType<typeof GenerateMockData>;
+  chartData: MockDataResult;
 }) {
   const aiScore = useMemo(() => {
     const dcfFair = calculateDCF({
-      fcf: company.fcf, shares: company.shares, netDebt: company.netDebt,
-      ...params,
+      fcf: company.fcf, shares: company.shares, netDebt: company.netDebt, ...params,
     }).fairValuePerShare;
-
     const sma20s = chartData.chartRows.map(r => r.sma20);
     const sma60s = chartData.chartRows.map(r => r.sma60);
     const cross  = detectMACross(sma20s, sma60s, 10);
-
     return calculateAIScore({
-      currentPrice: company.currentPrice,
-      dcfFairValue: dcfFair,
-      rsi: chartData.latestRSI,
-      crossSignal: cross,
-      per: company.per,
-      industryPer: company.industryPer,
-      pbr: company.pbr,
-      industryPbr: company.industryPbr,
+      currentPrice: company.currentPrice, dcfFairValue: dcfFair,
+      rsi: chartData.latestRSI, crossSignal: cross,
+      per: company.per, industryPer: company.industryPer,
+      pbr: company.pbr, industryPbr: company.industryPbr,
     });
   }, [company, params, chartData]);
 
@@ -422,27 +389,19 @@ function AIScoreWidget({ company, params, chartData }: {
           <Info className="w-3 h-3" /> 슬라이더 조정 시 실시간 갱신
         </span>
       </h3>
-
       <div className="flex flex-col sm:flex-row gap-6 items-center">
-        {/* 원형 게이지 */}
         <div className="relative flex-shrink-0">
           <svg width="140" height="140" className="-rotate-90">
             <circle cx="70" cy="70" r={radius} fill="none" stroke="#1f2937" strokeWidth="10" />
-            <circle
-              cx="70" cy="70" r={radius} fill="none"
-              stroke={scoreColor} strokeWidth="10"
-              strokeDasharray={`${dash} ${circ - dash}`}
-              strokeLinecap="round"
-              style={{ transition: 'stroke-dasharray 0.8s ease, stroke 0.4s ease' }}
-            />
+            <circle cx="70" cy="70" r={radius} fill="none" stroke={scoreColor} strokeWidth="10"
+              strokeDasharray={`${dash} ${circ - dash}`} strokeLinecap="round"
+              style={{ transition: 'stroke-dasharray 0.8s ease, stroke 0.4s ease' }} />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-4xl font-black text-white">{aiScore.score}</span>
             <span className="text-xs text-gray-500 -mt-1">/ 100</span>
           </div>
         </div>
-
-        {/* 등급 + 피드백 */}
         <div className="flex-1 min-w-0">
           <p className={cn('text-2xl font-extrabold mb-2', aiScore.gradeColor)}>{aiScore.grade}</p>
           <div className="bg-gray-800/50 rounded-xl p-3 text-xs text-gray-300 leading-relaxed border border-gray-700/50">
@@ -450,11 +409,9 @@ function AIScoreWidget({ company, params, chartData }: {
           </div>
         </div>
       </div>
-
-      {/* 점수 세부 분류 */}
       <div className="mt-5 space-y-3">
         {aiScore.breakdown.map(item => {
-          const pct = (item.points / item.maxPoints) * 100;
+          const pct    = (item.points / item.maxPoints) * 100;
           const barCol = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-rose-500';
           return (
             <div key={item.category}>
@@ -465,8 +422,7 @@ function AIScoreWidget({ company, params, chartData }: {
                 </span>
               </div>
               <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden mb-1">
-                <div className={cn('h-full rounded-full transition-all duration-700', barCol)}
-                  style={{ width: `${pct}%` }} />
+                <div className={cn('h-full rounded-full transition-all duration-700', barCol)} style={{ width: `${pct}%` }} />
               </div>
               <p className="text-[11px] text-gray-600 leading-relaxed">{item.reason}</p>
             </div>
@@ -480,7 +436,7 @@ function AIScoreWidget({ company, params, chartData }: {
 /* ─────────────────────────────────────────────
  * 7. 주가 차트
  * ───────────────────────────────────────────── */
-function PriceChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
+function PriceChart({ data }: { data: MockDataResult }) {
   return (
     <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -523,9 +479,9 @@ function PriceChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
 /* ─────────────────────────────────────────────
  * 8. RSI 차트
  * ───────────────────────────────────────────── */
-function RSIChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
+function RSIChart({ data }: { data: MockDataResult }) {
   const rsiVal = data.latestRSI ?? 50;
-  const zone   = rsiVal >= 70 ? { t: '과매수', c: 'text-rose-400', b: 'bg-rose-500/10', bd: 'border-rose-500/30' }
+  const zone   = rsiVal >= 70 ? { t: '과매수', c: 'text-rose-400',    b: 'bg-rose-500/10',    bd: 'border-rose-500/30' }
                : rsiVal <= 30 ? { t: '과매도', c: 'text-emerald-400', b: 'bg-emerald-500/10', bd: 'border-emerald-500/30' }
                : { t: '중립', c: 'text-gray-300', b: 'bg-gray-700/30', bd: 'border-gray-600/30' };
   return (
@@ -558,7 +514,7 @@ function RSIChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
 /* ─────────────────────────────────────────────
  * 9. MACD 차트
  * ───────────────────────────────────────────── */
-function MACDChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
+function MACDChart({ data }: { data: MockDataResult }) {
   return (
     <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -601,12 +557,27 @@ function MACDChart({ data }: { data: ReturnType<typeof GenerateMockData> }) {
 /* ─────────────────────────────────────────────
  * 10. 기업 프로필 카드
  * ───────────────────────────────────────────── */
-function ProfileCard({ company }: { company: CompanyFundamentals }) {
+function ProfileCard({ company, source, note, onRefresh, isLoading }: {
+  company: CompanyFundamentals;
+  source: 'live' | 'mock';
+  note?: string;
+  onRefresh: () => void;
+  isLoading: boolean;
+}) {
   const isPos  = company.changePercent >= 0;
   const range  = company.week52High - company.week52Low;
-  const curPct = Math.round(((company.currentPrice - company.week52Low) / range) * 100);
+  const curPct = range > 0 ? Math.round(((company.currentPrice - company.week52Low) / range) * 100) : 50;
+
   return (
     <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6">
+      {/* 데이터 소스 배너 */}
+      {note && (
+        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
+          <WifiOff className="w-3.5 h-3.5 flex-shrink-0" />
+          <span>{note}</span>
+        </div>
+      )}
+
       <div className="flex flex-col lg:flex-row lg:items-start gap-6">
         <div className="flex items-start gap-4 flex-1 min-w-0">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600/30 to-purple-600/30 border border-gray-700 flex items-center justify-center flex-shrink-0">
@@ -617,11 +588,23 @@ function ProfileCard({ company }: { company: CompanyFundamentals }) {
               <h1 className="text-xl font-bold text-white">{company.name}</h1>
               <span className="text-xs text-blue-300 bg-blue-500/15 border border-blue-500/25 px-2 py-0.5 rounded-full font-semibold">{company.ticker}</span>
               <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">{company.exchange}</span>
+              {/* 데이터 소스 뱃지 */}
+              <span className={cn(
+                'text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-medium',
+                source === 'live'
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                  : 'bg-slate-500/10 text-slate-400 border border-slate-500/20',
+              )}>
+                {source === 'live'
+                  ? <><Wifi className="w-2.5 h-2.5" /> LIVE</>
+                  : <><WifiOff className="w-2.5 h-2.5" /> MOCK</>}
+              </span>
             </div>
             <p className="text-xs text-gray-500 mt-1">{company.sector} · {company.industry}</p>
             <p className="text-xs text-gray-600 mt-2 leading-relaxed max-w-2xl">{company.description}</p>
           </div>
         </div>
+
         <div className="lg:text-right flex-shrink-0">
           <div className="flex items-baseline gap-3 lg:justify-end">
             <span className="text-4xl font-bold text-white tracking-tight">${company.currentPrice.toFixed(2)}</span>
@@ -644,14 +627,21 @@ function ProfileCard({ company }: { company: CompanyFundamentals }) {
             </div>
             <p className="text-[11px] text-gray-600 mt-1">52주 범위의 {curPct}% 위치</p>
           </div>
+          {/* 새로고침 버튼 */}
+          <button onClick={onRefresh} disabled={isLoading}
+            className="mt-3 flex items-center gap-1.5 text-[11px] text-gray-600 hover:text-gray-300 transition-colors ml-auto disabled:opacity-40">
+            <RefreshCw className={cn('w-3 h-3', isLoading && 'animate-spin')} />
+            데이터 새로고침
+          </button>
         </div>
       </div>
+
       <div className="mt-5 pt-5 border-t border-gray-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: '시가총액', value: company.marketCap,              Icon: DollarSign, accent: 'text-blue-400' },
-          { label: 'P/E 비율', value: `${company.per}x`,             Icon: BarChart2,  accent: 'text-purple-400' },
-          { label: '거래량',   value: company.volume,                 Icon: Activity,   accent: 'text-emerald-400' },
-          { label: '임직원',   value: company.employees,              Icon: Users,      accent: 'text-amber-400' },
+          { label: '시가총액', value: company.marketCap, Icon: DollarSign, accent: 'text-blue-400' },
+          { label: 'P/E 비율', value: `${company.per}x`,  Icon: BarChart2,  accent: 'text-purple-400' },
+          { label: '거래량',   value: company.volume,     Icon: Activity,   accent: 'text-emerald-400' },
+          { label: '임직원',   value: company.employees,  Icon: Users,      accent: 'text-amber-400' },
         ].map(({ label, value, Icon, accent }) => (
           <div key={label} className="flex items-center gap-3">
             <div className={cn('w-9 h-9 rounded-xl bg-gray-800/70 flex items-center justify-center flex-shrink-0', accent)}>
@@ -669,7 +659,7 @@ function ProfileCard({ company }: { company: CompanyFundamentals }) {
 }
 
 /* ─────────────────────────────────────────────
- * 섹션 구분선
+ * 11. 섹션 구분선
  * ───────────────────────────────────────────── */
 function SectionDivider({ label }: { label: string }) {
   return (
@@ -682,56 +672,150 @@ function SectionDivider({ label }: { label: string }) {
 }
 
 /* ─────────────────────────────────────────────
- * 11. 메인 페이지
+ * 12. 로딩 화면
+ * ───────────────────────────────────────────── */
+function LoadingScreen({ ticker }: { ticker: string }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-5" style={{ backgroundColor: '#060d1a' }}>
+      <div className="relative">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-xl shadow-blue-500/30">
+          <BarChart2 className="w-8 h-8 text-white" />
+        </div>
+        <div className="absolute -inset-2 rounded-3xl border-2 border-blue-500/30 animate-ping" />
+      </div>
+      <div className="text-center">
+        <p className="text-white font-bold text-lg">{ticker} 분석 중...</p>
+        <p className="text-gray-500 text-sm mt-1">실시간 데이터를 불러오고 있습니다</p>
+      </div>
+      <div className="flex gap-1.5">
+        {[0, 1, 2].map(i => (
+          <div key={i} className="w-2 h-2 rounded-full bg-blue-500 animate-bounce"
+            style={{ animationDelay: `${i * 0.15}s` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 13. 에러 화면
+ * ───────────────────────────────────────────── */
+function ErrorScreen({ ticker, message, onRetry }: {
+  ticker: string; message: string; onRetry: () => void;
+}) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-5" style={{ backgroundColor: '#060d1a' }}>
+      <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center">
+        <TrendingDown className="w-8 h-8 text-rose-400" />
+      </div>
+      <div className="text-center max-w-sm">
+        <p className="text-white font-bold text-lg">데이터 불러오기 실패</p>
+        <p className="text-gray-500 text-sm mt-1">티커: <span className="text-gray-300">{ticker}</span></p>
+        <p className="text-rose-400/80 text-xs mt-2 font-mono bg-rose-500/5 border border-rose-500/10 rounded-lg px-3 py-2">
+          {message}
+        </p>
+      </div>
+      <button onClick={onRetry}
+        className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold text-white transition-colors">
+        <RefreshCw className="w-4 h-4" />
+        다시 시도
+      </button>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+ * 14. 메인 대시보드 (기본 내보내기)
  * ───────────────────────────────────────────── */
 export default function StockDashboard() {
-  const [searchInput, setSearchInput]   = useState('AAPL');
-  const [activeTicker, setActiveTicker] = useState('AAPL');
-  const [activeTab, setActiveTab]       = useState<'fundamental' | 'technical'>('fundamental');
-  const [notFound, setNotFound]         = useState(false);
-  const [isLoading, setIsLoading]       = useState(false);
+  const [searchInput, setSearchInput] = useState('AAPL');
+  const [activeTab, setActiveTab]     = useState<'fundamental' | 'technical'>('fundamental');
 
-  /* DCF 파라미터: 티커별 기본값, 사용자가 슬라이더로 조정 가능 */
-  const [dcfParams, setDcfParams] = useState<DCFUserParams>(() => {
-    const db = COMPANY_DB['AAPL'];
-    return { growthRate: db.defaultGrowthRate, discountRate: db.defaultWACC, terminalGrowthRate: db.defaultTerminalGrowth };
+  /* ── API 데이터 상태 ─────────────────────── */
+  const [stockData, setStockData] = useState<StockData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError]   = useState<string | null>(null);
+  const [lastTicker, setLastTicker] = useState('AAPL');
+
+  /* ── DCF 슬라이더 파라미터 ──────────────── */
+  const [dcfParams, setDcfParams] = useState<DCFUserParams>({
+    growthRate: 0.09, discountRate: 0.085, terminalGrowthRate: 0.03,
   });
 
-  const company = COMPANY_DB[activeTicker];
-
-  /* 티커 변경 시 DCF 파라미터 리셋 */
-  const switchTicker = useCallback((t: string) => {
-    const db = COMPANY_DB[t];
-    if (!db) return;
-    setNotFound(false);
+  /* ── 데이터 페치 ────────────────────────── */
+  const fetchStockData = useCallback(async (ticker: string) => {
+    const t = ticker.trim().toUpperCase();
+    if (!t) return;
     setIsLoading(true);
-    setDcfParams({ growthRate: db.defaultGrowthRate, discountRate: db.defaultWACC, terminalGrowthRate: db.defaultTerminalGrowth });
-    setTimeout(() => { setActiveTicker(t); setIsLoading(false); }, 420);
+    setApiError(null);
+    setLastTicker(t);
+    try {
+      const res = await fetch(`/api/stock?ticker=${encodeURIComponent(t)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+      const data: StockData = await res.json();
+      setStockData(data);
+      // 티커별 기본 DCF 파라미터로 리셋
+      setDcfParams({
+        growthRate:        data.defaultGrowthRate,
+        discountRate:      data.defaultWACC,
+        terminalGrowthRate: data.defaultTerminalGrowth,
+      });
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const handleSearch = () => {
-    const t = searchInput.trim().toUpperCase();
-    if (COMPANY_DB[t]) switchTicker(t);
-    else setNotFound(true);
-  };
+  /* ── 최초 마운트 시 AAPL 로드 ────────────── */
+  useEffect(() => {
+    fetchStockData('AAPL');
+  }, [fetchStockData]);
 
-  /* 차트 데이터 (메모이제이션) */
-  const chartData = useMemo(
-    () => GenerateMockData(activeTicker, START_PRICES[activeTicker] ?? 100),
-    [activeTicker],
-  );
+  const handleSearch = useCallback(() => {
+    const t = searchInput.trim().toUpperCase();
+    if (t) { setSearchInput(t); fetchStockData(t); }
+  }, [searchInput, fetchStockData]);
 
   const updateParam = useCallback((partial: Partial<DCFUserParams>) => {
     setDcfParams(prev => ({ ...prev, ...partial }));
   }, []);
 
+  /* ── 로딩 중 (초기 데이터 없을 때만 풀스크린) ── */
+  if (!stockData && isLoading) return <LoadingScreen ticker={lastTicker} />;
+
+  /* ── 에러 (데이터 없을 때만 풀스크린) ──────── */
+  if (!stockData && apiError) return (
+    <ErrorScreen ticker={lastTicker} message={apiError} onRetry={() => fetchStockData(lastTicker)} />
+  );
+
+  /* ── 초기 데이터 없음 (기술적으로 발생 불가) ── */
+  if (!stockData) return null;
+
+  /* ── 컴포넌트 prop 타입 호환 추출 ────────── */
+  const company: CompanyFundamentals = stockData;
+  const chartData: MockDataResult = {
+    chartRows:   stockData.chartRows,
+    allPrices:   stockData.allPrices,
+    latestRSI:   stockData.latestRSI,
+    latestSMA20: stockData.latestSMA20,
+    latestSMA60: stockData.latestSMA60,
+  };
+
+  const activeTicker = stockData.ticker;
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#060d1a', color: 'white' }}>
 
-      {/* ── HEADER ─────────────────────────────────── */}
+      {/* ── HEADER ───────────────────────────── */}
       <header style={{ borderBottom: '1px solid #1a2535', backgroundColor: 'rgba(6,13,26,0.92)' }}
         className="sticky top-0 z-50 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-4">
+
+          {/* 로고 */}
           <div className="flex items-center gap-2.5 flex-shrink-0">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
               <BarChart2 className="w-4 h-4 text-white" />
@@ -742,29 +826,34 @@ export default function StockDashboard() {
             </span>
           </div>
 
+          {/* 검색창 */}
           <div className="flex gap-2 flex-1 max-w-sm relative">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
               <input type="text" value={searchInput}
-                onChange={e => { setSearchInput(e.target.value.toUpperCase()); setNotFound(false); }}
+                onChange={e => setSearchInput(e.target.value.toUpperCase())}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
                 placeholder="티커 입력 (AAPL, TSLA…)"
                 className="w-full pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 rounded-xl border outline-none transition-colors"
-                style={{ backgroundColor: '#111827', borderColor: notFound ? '#f43f5e' : '#1f2d3d' }}
+                style={{ backgroundColor: '#111827', borderColor: '#1f2d3d' }}
               />
             </div>
-            <button onClick={handleSearch}
-              className="px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0"
+            <button onClick={handleSearch} disabled={isLoading}
+              className="px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 disabled:opacity-60 flex items-center gap-1.5"
               style={{ backgroundColor: '#2563eb' }}>
-              검색
+              {isLoading
+                ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> 조회 중</>
+                : '검색'}
             </button>
-            {notFound && <p className="absolute top-full left-0 mt-1 text-xs text-rose-400">지원 티커: AAPL · TSLA · MSFT · GOOGL</p>}
           </div>
 
+          {/* 빠른 접근 버튼 */}
           <div className="flex gap-1.5 flex-wrap">
-            {Object.keys(COMPANY_DB).map(t => (
-              <button key={t} onClick={() => { setSearchInput(t); switchTicker(t); }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+            {QUICK_TICKERS.map(t => (
+              <button key={t}
+                onClick={() => { setSearchInput(t); fetchStockData(t); }}
+                disabled={isLoading}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
                 style={{
                   backgroundColor: activeTicker === t ? '#2563eb' : '#111827',
                   color: activeTicker === t ? 'white' : '#9ca3af',
@@ -774,14 +863,35 @@ export default function StockDashboard() {
               </button>
             ))}
           </div>
+
+          {/* QA 하네스 링크 */}
+          <Link href="/admin/test-harness"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-300 border border-gray-800 hover:border-gray-600 transition-colors">
+            <FlaskConical className="w-3.5 h-3.5" />
+            QA
+          </Link>
         </div>
       </header>
 
-      {/* ── MAIN ───────────────────────────────────── */}
-      <main className={cn('max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5', isLoading && 'loading-shimmer')}>
-        <ProfileCard company={company} />
+      {/* ── 로딩 오버레이 (데이터 있을 때 전환 중) ── */}
+      {isLoading && stockData && (
+        <div className="fixed top-16 left-0 right-0 z-40 flex items-center justify-center py-2 bg-blue-600/90 backdrop-blur-sm">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin mr-2" />
+          <span className="text-xs font-medium text-white">{lastTicker} 데이터 로딩 중…</span>
+        </div>
+      )}
 
-        {/* 탭 네비게이션 */}
+      {/* ── MAIN ─────────────────────────────── */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+        <ProfileCard
+          company={company}
+          source={stockData.source}
+          note={stockData.note}
+          onRefresh={() => fetchStockData(activeTicker)}
+          isLoading={isLoading}
+        />
+
+        {/* 탭 */}
         <div className="flex gap-1 p-1 rounded-2xl w-fit" style={{ backgroundColor: '#0d1929', border: '1px solid #1a2535' }}>
           {[
             { key: 'fundamental' as const, label: '📊  기업 펀더멘탈 분석' },
@@ -798,7 +908,7 @@ export default function StockDashboard() {
           ))}
         </div>
 
-        {/* ── 펀더멘탈 탭 ───────────────────────────── */}
+        {/* ── 펀더멘탈 탭 ──────────────────────── */}
         {activeTab === 'fundamental' && (
           <div className="space-y-5 tab-content">
             <SectionDivider label="주요 투자 지표" />
@@ -826,7 +936,7 @@ export default function StockDashboard() {
           </div>
         )}
 
-        {/* ── 기술적 차트 탭 ─────────────────────────── */}
+        {/* ── 기술적 차트 탭 ───────────────────── */}
         {activeTab === 'technical' && (
           <div className="space-y-5 tab-content">
             <SectionDivider label="AI 종합 투자 매력도" />
@@ -846,12 +956,12 @@ export default function StockDashboard() {
 
       <footer className="mt-12 py-6 text-center" style={{ borderTop: '1px solid #1a2535' }}>
         <p className="text-xs text-gray-700">
-          Stock-er · 교육 목적 Mock 데이터 사용 — 실제 투자 결정에 활용하지 마세요.
+          Stock-er · {stockData.source === 'live' ? '실시간 Alpha Vantage 데이터' : '교육 목적 Mock 데이터'} — 실제 투자 결정에 활용하지 마세요. ·{' '}
+          <Link href="/admin/test-harness" className="hover:text-gray-500 transition-colors underline">
+            QA 테스트 하네스
+          </Link>
         </p>
       </footer>
-
-      {/* ── QA 하네스 모니터 (플로팅) ─────────── */}
-      <QAHarnessMonitor />
     </div>
   );
 }
