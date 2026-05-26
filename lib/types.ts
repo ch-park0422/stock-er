@@ -11,13 +11,16 @@ import type { CompanyFundamentals, MockDataResult } from './mockData';
 /**
  * /api/stock 엔드포인트의 성공 응답 타입
  *
- * - source: 'live'  → Alpha Vantage 실제 데이터
- * - source: 'mock'  → API 키 미설정 또는 오류 시 Seed 기반 Mock 폴백
+ * - source: 'live'  → 외부 API 실제 데이터 (Alpha Vantage 또는 Finnhub)
+ * - source: 'mock'  → API 키 미설정 또는 모든 API 실패 시 Seed 기반 Mock 폴백
+ * - provider: 어떤 API에서 데이터를 받아왔는지
  */
 export type StockData = CompanyFundamentals &
   MockDataResult & {
     /** 데이터 출처 */
     source: 'live' | 'mock';
+    /** 실제 데이터 제공 API */
+    provider?: 'alphavantage' | 'finnhub' | 'mock';
     /** ISO 타임스탬프 */
     fetchedAt: string;
     /** API 키 미설정·Rate Limit 등 사유 메모 */
