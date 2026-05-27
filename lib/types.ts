@@ -20,7 +20,7 @@ export type StockData = CompanyFundamentals &
     /** 데이터 출처 */
     source: 'live' | 'mock';
     /** 실제 데이터 제공 API */
-    provider?: 'alphavantage' | 'finnhub' | 'mock';
+    provider?: 'alphavantage' | 'finnhub' | 'yahoo' | 'mock';
     /** ISO 타임스탬프 */
     fetchedAt: string;
     /** API 키 미설정·Rate Limit 등 사유 메모 */
