@@ -90,10 +90,13 @@ const dashboard = {
     dcfReset:     '↺ 기본값',
     growthRate:   'FCF 성장률',
     growthSub:    '예상 연간 잉여현금흐름 성장률',
+    growthRateHelp: '기업이 향후 수년간 매년 매출을 얼마나 늘릴지 예측하는 비율입니다. 미래 성장성을 낙관적으로 보면 수치를 올리고, 보수적으로 보면 낮추어 적정 주가의 변화를 시뮬레이션할 수 있습니다.',
     wacc:         '할인율 (WACC)',
     waccSub:      '가중평균자본비용',
+    waccHelp:     '미래에 벌어들일 돈을 현재 가치로 환산하기 위해 깎는 비율입니다. 시장 금리가 오르거나 기업의 투자 리스크가 크다고 판단되면 이 값을 높여야 하며, 할인율이 높아지면 적정 주가는 낮아집니다.',
     termGrowth:   '영구 성장률',
     termSub:      '터미널 밸류 영구 성장 가정',
+    termGrowthHelp: '예측 기간 이후 기업이 평생 동안 영구히 성장할 것으로 가정하는 최소한의 비율입니다. 보통 국가의 장기 물가상승률이나 GDP 성장률 수준인 1~2% 선으로 설정하며, 미세한 조정으로도 적정 주가에 큰 영향을 미칩니다.',
 
     /* FinancialHealth */
     healthTitle:      '수익성 & 재무 건전성',
@@ -257,10 +260,13 @@ const dashboard = {
     dcfReset:     '↺ Reset',
     growthRate:   'FCF Growth Rate',
     growthSub:    'Expected annual free cash flow growth',
+    growthRateHelp: 'The predicted annual rate at which the company will increase its revenue. Raise it for an optimistic outlook, or lower it for a conservative evaluation.',
     wacc:         'Discount Rate (WACC)',
     waccSub:      'Weighted average cost of capital',
+    waccHelp:     'The rate used to convert future cash flows into present value. Higher interest rates or market risks require a higher discount rate, which lowers the fair value.',
     termGrowth:   'Terminal Growth Rate',
     termSub:      'Perpetual growth assumption for terminal value',
+    termGrowthHelp: 'The constant rate at which a company is expected to grow forever after the explicit forecast period. Usually set around 1–2% (long-term GDP or inflation growth).',
 
     /* FinancialHealth */
     healthTitle:      'Profitability & Financial Health',

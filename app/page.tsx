@@ -17,7 +17,7 @@ import {
   Search, Building2, Users, Activity, DollarSign, BarChart2,
   Target, ArrowUpRight, ArrowDownRight, Zap, ChevronRight,
   SlidersHorizontal, Info, FlaskConical, WifiOff, RefreshCw,
-  ServerCrash, X, Globe,
+  ServerCrash, X, Globe, HelpCircle,
 } from 'lucide-react';
 
 import {
@@ -27,11 +27,6 @@ import {
 import type { CompanyFundamentals, MockDataResult, ChartRow } from '@/lib/mockData';
 import type { StockData } from '@/lib/types';
 import { translations, type Lang, type DashboardT } from '@/lib/i18n';
-
-/* ─────────────────────────────────────────────
- * 빠른 접근 티커 (US + KR 혼합)
- * ───────────────────────────────────────────── */
-const QUICK_TICKERS = ['AAPL', 'TSLA', '삼성전자', '005930'];
 
 /* ─────────────────────────────────────────────
  * 유틸
@@ -122,8 +117,64 @@ function MACDTooltip({ active, payload, label }: {
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * 2. DCF 슬라이더
+ * 2. DCF 슬라이더 + 도움말 툴팁
  * ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * 슬라이더 라벨 옆 ? 아이콘 — 호버 또는 클릭(모바일)으로 툴팁 표시
+ *
+ * hover 상태와 click-locked 상태를 분리해 관리:
+ *  - 마우스 오버 시: 즉시 표시
+ *  - 클릭 시: pinned=true → 마우스가 떠나도 유지 → 다시 클릭하면 해제
+ */
+function SliderHelpIcon({ text }: { text: string }) {
+  const [hovered, setHovered] = useState(false);
+  const [pinned,  setPinned]  = useState(false);
+  const visible = hovered || pinned;
+
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        type="button"
+        aria-label="도움말"
+        aria-expanded={visible}
+        className={cn(
+          'transition-colors rounded outline-none',
+          visible ? 'text-blue-400' : 'text-gray-600 hover:text-blue-400',
+        )}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onClick={e => { e.stopPropagation(); setPinned(v => !v); }}
+      >
+        <HelpCircle className="w-3.5 h-3.5" />
+      </button>
+
+      {visible && (
+        <div
+          role="tooltip"
+          className={cn(
+            'pointer-events-none absolute z-50',
+            'bottom-full left-1/2 -translate-x-1/2 mb-2.5',
+            'w-64 rounded-2xl px-4 py-3',
+            'bg-gray-900 border border-blue-500/20',
+            'text-[11px] text-gray-300 leading-relaxed',
+            'shadow-2xl shadow-black/70',
+            'animate-in fade-in duration-150',
+          )}
+        >
+          {text}
+          {/* 아래 방향 캐럿 */}
+          <span
+            className="absolute top-full left-1/2 -translate-x-1/2
+                       border-x-4 border-x-transparent
+                       border-t-4 border-t-gray-900"
+          />
+        </div>
+      )}
+    </span>
+  );
+}
+
 interface SliderProps {
   label: string; sub: string;
   value: number; min: number; max: number; step: number;
@@ -132,17 +183,22 @@ interface SliderProps {
   color: string;
   /** 슬라이더 바 배경색 — Tailwind JIT 정적 스캔을 위해 명시적으로 전달 */
   barColor: string;
+  /** 라벨 옆 ? 아이콘 툴팁 텍스트 (optional) */
+  helpText?: string;
 }
-function ParamSlider({ label, sub, value, min, max, step, format, onChange, color, barColor }: SliderProps) {
+function ParamSlider({
+  label, sub, value, min, max, step, format, onChange, color, barColor, helpText,
+}: SliderProps) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
     <div>
       <div className="flex justify-between items-center mb-2">
-        <div>
+        <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs font-semibold text-gray-300">{label}</span>
-          <span className="text-[10px] text-gray-600 ml-2">{sub}</span>
+          {helpText && <SliderHelpIcon text={helpText} />}
+          <span className="text-[10px] text-gray-600">{sub}</span>
         </div>
-        <span className={cn('text-sm font-bold', color)}>{format(value)}</span>
+        <span className={cn('text-sm font-bold flex-shrink-0 ml-2', color)}>{format(value)}</span>
       </div>
       <div className="relative h-2 bg-gray-800 rounded-full">
         <div className={cn('absolute h-full rounded-full', barColor)}
@@ -341,17 +397,20 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
           value={params.growthRate} min={0.01} max={0.40} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
           onChange={v => onParamChange({ growthRate: v })}
-          color="text-blue-400" barColor="bg-blue-400" />
+          color="text-blue-400" barColor="bg-blue-400"
+          helpText={t.growthRateHelp} />
         <ParamSlider label={t.wacc} sub={t.waccSub}
           value={params.discountRate} min={0.05} max={0.15} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
           onChange={v => onParamChange({ discountRate: v })}
-          color="text-purple-400" barColor="bg-purple-400" />
+          color="text-purple-400" barColor="bg-purple-400"
+          helpText={t.waccHelp} />
         <ParamSlider label={t.termGrowth} sub={t.termSub}
           value={params.terminalGrowthRate} min={0.005} max={0.05} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
           onChange={v => onParamChange({ terminalGrowthRate: v })}
-          color="text-amber-400" barColor="bg-amber-400" />
+          color="text-amber-400" barColor="bg-amber-400"
+          helpText={t.termGrowthHelp} />
       </div>
     </div>
   );
@@ -1051,23 +1110,6 @@ export default function StockDashboard() {
                 ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> {t.searching}</>
                 : t.searchBtn}
             </button>
-          </div>
-
-          {/* 빠른 접근 */}
-          <div className="flex gap-1.5 flex-wrap">
-            {QUICK_TICKERS.map(tk => (
-              <button key={tk}
-                onClick={() => { setSearchInput(tk); fetchStockData(tk); }}
-                disabled={isLoading}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
-                style={{
-                  backgroundColor: activeTicker === tk ? '#2563eb' : '#111827',
-                  color: activeTicker === tk ? 'white' : '#9ca3af',
-                  border: `1px solid ${activeTicker === tk ? 'transparent' : '#1f2d3d'}`,
-                }}>
-                {tk}
-              </button>
-            ))}
           </div>
 
           {/* 우측 도구: 통화 토글 + 언어 토글 + QA */}
