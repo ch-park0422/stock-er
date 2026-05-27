@@ -4,9 +4,10 @@
  * app/page.tsx
  * 메인 대시보드 — 실시간 주식 분석 (API 연동)
  * KO / EN 언어 토글 · 한글/숫자 한국 주식 검색 지원
+ * v3: 모바일 반응형 + 터치 툴팁 수정
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
@@ -46,7 +47,7 @@ interface DCFUserParams {
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * 1. 툴팁
+ * 1. 차트 툴팁
  * ═══════════════════════════════════════════════════════════════ */
 type TooltipPayload = { dataKey: string; value: number; payload: Record<string, number> };
 
@@ -117,45 +118,57 @@ function MACDTooltip({ active, payload, label }: {
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * 2. DCF 슬라이더 + 도움말 툴팁
+ * 2. DCF 슬라이더 + 도움말 툴팁 (모바일 터치 대응)
  * ═══════════════════════════════════════════════════════════════ */
 
 /**
- * 슬라이더 라벨 옆 ? 아이콘 — 호버 또는 클릭(모바일)으로 툴팁 표시
+ * SliderHelpIcon
  *
- * hover 상태와 click-locked 상태를 분리해 관리:
- *  - 마우스 오버 시: 즉시 표시
- *  - 클릭 시: pinned=true → 마우스가 떠나도 유지 → 다시 클릭하면 해제
+ * - 부모(DCFGauge)가 관리하는 `activeTooltip / setActiveTooltip` 를 props로 받음
+ * - 클릭/터치: 해당 id가 이미 열려있으면 닫기, 아니면 열기 (토글)
+ * - 바깥 영역 터치/클릭 감지는 부모(DCFGauge)의 useEffect에서 일괄 처리
+ * - 모바일 overflow 방지: 모바일(< sm)에서 left-0 정렬, sm+에서 가운데 정렬
  */
-function SliderHelpIcon({ text }: { text: string }) {
-  const [hovered, setHovered] = useState(false);
-  const [pinned,  setPinned]  = useState(false);
-  const visible = hovered || pinned;
+function SliderHelpIcon({
+  id, text, activeTooltip, setActiveTooltip,
+}: {
+  id: string;
+  text: string;
+  activeTooltip: string | null;
+  setActiveTooltip: (v: string | null) => void;
+}) {
+  const isOpen = activeTooltip === id;
 
   return (
     <span className="relative inline-flex items-center">
+      {/* 터치 타깃을 넉넉하게 (44×44px 권장) — padding으로 확장 */}
       <button
         type="button"
         aria-label="도움말"
-        aria-expanded={visible}
+        aria-expanded={isOpen}
         className={cn(
-          'transition-colors rounded outline-none',
-          visible ? 'text-blue-400' : 'text-gray-600 hover:text-blue-400',
+          'p-1 -m-1 transition-colors rounded outline-none focus-visible:ring-1 focus-visible:ring-blue-500',
+          'touch-manipulation',          // iOS 300ms 딜레이 제거
+          isOpen ? 'text-blue-400' : 'text-gray-500 hover:text-blue-400',
         )}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onClick={e => { e.stopPropagation(); setPinned(v => !v); }}
+        onClick={e => {
+          e.stopPropagation();
+          setActiveTooltip(isOpen ? null : id);
+        }}
       >
         <HelpCircle className="w-3.5 h-3.5" />
       </button>
 
-      {visible && (
+      {isOpen && (
         <div
           role="tooltip"
           className={cn(
-            'pointer-events-none absolute z-50',
-            'bottom-full left-1/2 -translate-x-1/2 mb-2.5',
-            'w-64 rounded-2xl px-4 py-3',
+            'absolute z-50 bottom-full mb-3',
+            // 모바일: 왼쪽 정렬 (overflow 방지), sm+: 중앙 정렬
+            'left-0 sm:left-1/2 sm:-translate-x-1/2',
+            // 너비: 최대 256px, 뷰포트 80% 초과 금지
+            'w-56 sm:w-64',
+            'rounded-2xl px-4 py-3',
             'bg-gray-900 border border-blue-500/20',
             'text-[11px] text-gray-300 leading-relaxed',
             'shadow-2xl shadow-black/70',
@@ -163,12 +176,11 @@ function SliderHelpIcon({ text }: { text: string }) {
           )}
         >
           {text}
-          {/* 아래 방향 캐럿 */}
-          <span
-            className="absolute top-full left-1/2 -translate-x-1/2
-                       border-x-4 border-x-transparent
-                       border-t-4 border-t-gray-900"
-          />
+          {/* 아래 방향 캐럿 — 모바일/desktop 정렬에 맞춰 위치 분기 */}
+          <span className={cn(
+            'absolute top-full border-x-4 border-x-transparent border-t-4 border-t-gray-900',
+            'left-4 sm:left-1/2 sm:-translate-x-1/2',
+          )} />
         </div>
       )}
     </span>
@@ -176,18 +188,26 @@ function SliderHelpIcon({ text }: { text: string }) {
 }
 
 interface SliderProps {
-  label: string; sub: string;
-  value: number; min: number; max: number; step: number;
+  label: string;
+  sub: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
   format: (v: number) => string;
   onChange: (v: number) => void;
   color: string;
-  /** 슬라이더 바 배경색 — Tailwind JIT 정적 스캔을 위해 명시적으로 전달 */
+  /** Tailwind JIT 정적 스캔을 위해 명시적으로 전달 */
   barColor: string;
-  /** 라벨 옆 ? 아이콘 툴팁 텍스트 (optional) */
   helpText?: string;
+  helpId?: string;
+  activeTooltip?: string | null;
+  setActiveTooltip?: (v: string | null) => void;
 }
+
 function ParamSlider({
-  label, sub, value, min, max, step, format, onChange, color, barColor, helpText,
+  label, sub, value, min, max, step, format, onChange, color, barColor,
+  helpText, helpId, activeTooltip, setActiveTooltip,
 }: SliderProps) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
@@ -195,17 +215,26 @@ function ParamSlider({
       <div className="flex justify-between items-center mb-2">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs font-semibold text-gray-300">{label}</span>
-          {helpText && <SliderHelpIcon text={helpText} />}
+          {helpText && helpId && activeTooltip !== undefined && setActiveTooltip && (
+            <SliderHelpIcon
+              id={helpId}
+              text={helpText}
+              activeTooltip={activeTooltip}
+              setActiveTooltip={setActiveTooltip}
+            />
+          )}
           <span className="text-[10px] text-gray-600">{sub}</span>
         </div>
         <span className={cn('text-sm font-bold flex-shrink-0 ml-2', color)}>{format(value)}</span>
       </div>
       <div className="relative h-2 bg-gray-800 rounded-full">
-        <div className={cn('absolute h-full rounded-full', barColor)}
-          style={{ width: `${pct}%` }} />
-        <input type="range" min={min} max={max} step={step} value={value}
+        <div className={cn('absolute h-full rounded-full', barColor)} style={{ width: `${pct}%` }} />
+        {/* range input은 opacity-0 으로 덮어씌워 슬라이더 트랙을 직접 스타일링 */}
+        <input
+          type="range" min={min} max={max} step={step} value={value}
           onChange={e => onChange(parseFloat(e.target.value))}
-          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full" />
+          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+        />
       </div>
       <div className="flex justify-between text-[10px] text-gray-700 mt-1">
         <span>{format(min)}</span><span>{format(max)}</span>
@@ -215,7 +244,7 @@ function ParamSlider({
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * 3. DCF 게이지 (하이브리드 가치평가: DCF 우선 → EPS-PER 폴백)
+ * 3. DCF 게이지 (하이브리드 가치평가: DCF → EPS-PER → unavailable)
  * ═══════════════════════════════════════════════════════════════ */
 function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
   company: CompanyFundamentals;
@@ -225,7 +254,33 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
   fmtPx: (v: number) => string;
   convFactor: number;
 }) {
-  // 하이브리드 엔진: DCF 가능하면 DCF, 아니면 EPS-PER 자동 전환
+  /* ── 툴팁 상태: string = 열린 슬라이더 ID, null = 모두 닫힘 ── */
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const gaugeRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * 바깥 영역 mousedown / touchstart → 툴팁 닫기
+   * - capture phase(true)로 등록해 stopPropagation 방어
+   * - activeTooltip이 null이면 리스너 불필요
+   */
+  useEffect(() => {
+    if (!activeTooltip) return;
+
+    const closeTooltip = (e: MouseEvent | TouchEvent) => {
+      if (gaugeRef.current && !gaugeRef.current.contains(e.target as Node)) {
+        setActiveTooltip(null);
+      }
+    };
+
+    document.addEventListener('mousedown',  closeTooltip, true);
+    document.addEventListener('touchstart', closeTooltip, true);
+    return () => {
+      document.removeEventListener('mousedown',  closeTooltip, true);
+      document.removeEventListener('touchstart', closeTooltip, true);
+    };
+  }, [activeTooltip]);
+
+  /* ── 하이브리드 가치평가 ─────────────────────── */
   const result = useMemo(() => calculateHybridValuation({
     fcf:               company.fcf,
     shares:            company.shares,
@@ -237,9 +292,9 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
     trailingEps:       company.trailingEps,
   }), [company, params]);
 
-  const fairValue       = result.fairValuePerShare;
-  const isEpsModel      = result.model === 'eps';
-  const isUnavailable   = result.model === 'unavailable';
+  const fairValue     = result.fairValuePerShare;
+  const isEpsModel    = result.model === 'eps';
+  const isUnavailable = result.model === 'unavailable';
 
   const valuation = getValuationLabel(fairValue, company.currentPrice);
   const valLabel  = valuation.label === '저평가' ? t.valUnder
@@ -249,7 +304,6 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
   const range     = bullVal - bearVal;
   const curPos    = Math.min(Math.max(((company.currentPrice - bearVal) / range) * 100, 2), 97);
 
-  /* 모델 배지 색상 */
   const modelBadgeCls = isUnavailable
     ? 'text-gray-500 bg-gray-700/20 border-gray-700/40'
     : isEpsModel
@@ -258,21 +312,21 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
   const modelBadgeIcon = isUnavailable ? '⚠️' : isEpsModel ? '📊' : '💹';
   const modelBadgeText = isUnavailable
     ? t.unavailableModelBadge
-    : isEpsModel
-    ? t.epsModelBadge
-    : t.dcfModelBadge;
+    : isEpsModel ? t.epsModelBadge : t.dcfModelBadge;
 
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6 h-full flex flex-col">
+    <div
+      ref={gaugeRef}
+      className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-6 h-full flex flex-col"
+    >
       {/* 헤더 */}
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <h3 className="text-white font-bold text-base flex items-center gap-2">
-            <Target className="w-4 h-4 text-blue-400" />
+      <div className="flex items-start justify-between mb-2 gap-2">
+        <div className="min-w-0">
+          <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2">
+            <Target className="w-4 h-4 text-blue-400 flex-shrink-0" />
             {t.dcfTitle}
           </h3>
           <p className="text-xs text-gray-500 mt-0.5">{t.dcfSub}</p>
-          {/* 모델 배지 — 슬라이더 조정 시 실시간 갱신 */}
           <span className={cn(
             'inline-flex items-center gap-1 mt-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full border',
             modelBadgeCls,
@@ -281,8 +335,10 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
           </span>
         </div>
         {!isUnavailable && (
-          <div className={cn('px-3 py-1.5 rounded-xl text-sm font-bold border',
-            valuation.bgColor, valuation.borderColor, valuation.color)}>
+          <div className={cn(
+            'px-2.5 sm:px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold border flex-shrink-0',
+            valuation.bgColor, valuation.borderColor, valuation.color,
+          )}>
             {valuation.upsidePct > 0 ? '▲' : '▼'} {Math.abs(valuation.upsidePct).toFixed(1)}% {valLabel}
           </div>
         )}
@@ -290,8 +346,8 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
 
       {/* ── 데이터 미제공 상태 ── */}
       {isUnavailable ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 py-8">
-          <div className="w-16 h-16 rounded-2xl bg-gray-800/60 border border-gray-700/50 flex items-center justify-center text-3xl">
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 py-6">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gray-800/60 border border-gray-700/50 flex items-center justify-center text-2xl sm:text-3xl">
             📊
           </div>
           <div>
@@ -308,24 +364,30 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
         <>
           {/* 게이지 바 */}
           <div className="relative mt-8 mb-12">
-            <div className="h-7 rounded-full bg-gradient-to-r from-rose-600/80 via-amber-500/80 to-emerald-500/80 relative overflow-visible shadow-inner">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-white/60 font-medium select-none">{t.dcfUnder}</span>
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-white/60 font-medium select-none">{t.dcfOver}</span>
+            <div className="h-6 sm:h-7 rounded-full bg-gradient-to-r from-rose-600/80 via-amber-500/80 to-emerald-500/80 relative overflow-visible shadow-inner">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] sm:text-[10px] text-white/60 font-medium select-none">{t.dcfUnder}</span>
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] sm:text-[10px] text-white/60 font-medium select-none">{t.dcfOver}</span>
               {/* 적정가 마커 */}
               <div className="absolute top-0 bottom-0 flex flex-col items-center" style={{ left: '50%' }}>
                 <div className="absolute -top-7 transform -translate-x-1/2 whitespace-nowrap">
-                  <span className="text-[11px] font-bold text-yellow-300 bg-yellow-500/20 border border-yellow-500/40 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-yellow-300 bg-yellow-500/20 border border-yellow-500/40 px-1.5 sm:px-2 py-0.5 rounded-full">
                     {t.dcfFairLabel} {fmtPx(fairValue * convFactor)}
                   </span>
                 </div>
                 <div className="w-0.5 h-full bg-yellow-300/80" />
-                <div className="absolute -bottom-2 w-2.5 h-2.5 bg-yellow-300 rounded-full transform -translate-x-1/2" style={{ left: '50%' }} />
+                <div
+                  className="absolute -bottom-2 w-2.5 h-2.5 bg-yellow-300 rounded-full transform -translate-x-1/2"
+                  style={{ left: '50%' }}
+                />
               </div>
               {/* 현재가 마커 */}
               <div className="absolute top-0 bottom-0" style={{ left: `${curPos}%` }}>
                 <div className="w-1 h-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
-                <div className="absolute -bottom-9 transform -translate-x-1/2 whitespace-nowrap" style={{ left: '50%' }}>
-                  <span className="text-[11px] font-bold text-white bg-blue-600 px-2 py-0.5 rounded-full">
+                <div
+                  className="absolute -bottom-9 transform -translate-x-1/2 whitespace-nowrap"
+                  style={{ left: '50%' }}
+                >
+                  <span className="text-[10px] sm:text-[11px] font-bold text-white bg-blue-600 px-1.5 sm:px-2 py-0.5 rounded-full">
                     {t.dcfCurrent} {fmtPx(company.currentPrice * convFactor)}
                   </span>
                 </div>
@@ -334,43 +396,43 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
           </div>
 
           {/* Bear / Current / Bull */}
-          <div className="grid grid-cols-3 gap-2 mb-5">
+          <div className="grid grid-cols-3 gap-2 mb-4">
             {[
               { l: t.dcfBear,    v: fmtPx(bearVal  * convFactor), c: 'text-rose-400' },
               { l: t.dcfCurrent, v: fmtPx(company.currentPrice * convFactor), c: 'text-white font-bold' },
               { l: t.dcfBull,    v: fmtPx(bullVal  * convFactor), c: 'text-emerald-400' },
             ].map(item => (
-              <div key={item.l} className="bg-gray-800/50 rounded-xl p-2.5 text-center">
-                <p className="text-[10px] text-gray-500 mb-1 leading-tight">{item.l}</p>
-                <p className={cn('text-sm', item.c)}>{item.v}</p>
+              <div key={item.l} className="bg-gray-800/50 rounded-xl p-2 sm:p-2.5 text-center">
+                <p className="text-[9px] sm:text-[10px] text-gray-500 mb-1 leading-tight">{item.l}</p>
+                <p className={cn('text-xs sm:text-sm truncate', item.c)}>{item.v}</p>
               </div>
             ))}
           </div>
 
-          {/* DCF 모드: PV FCFs / Terminal / EV  |  EPS 모드: EPS · PER · 적정가 */}
+          {/* EPS 모드 / DCF 모드 상세 */}
           {isEpsModel ? (
-            <div className="grid grid-cols-3 gap-2 mb-5 text-center">
+            <div className="grid grid-cols-3 gap-2 mb-4 text-center">
               {[
                 { l: t.epsEpsLabel,  v: fmtPx((result.trailingEpsUsed ?? 0) * convFactor) },
                 { l: t.epsPERLabel,  v: `× ${fmt(result.targetPerUsed ?? 12.5, 1)}` },
                 { l: t.epsFairLabel, v: fmtPx(fairValue * convFactor) },
               ].map(item => (
-                <div key={item.l} className="bg-amber-500/5 border border-amber-500/15 rounded-xl p-2.5">
-                  <p className="text-[10px] text-amber-600/80 mb-1">{item.l}</p>
-                  <p className="text-sm font-bold text-amber-200">{item.v}</p>
+                <div key={item.l} className="bg-amber-500/5 border border-amber-500/15 rounded-xl p-2 sm:p-2.5">
+                  <p className="text-[9px] sm:text-[10px] text-amber-600/80 mb-1">{item.l}</p>
+                  <p className="text-xs sm:text-sm font-bold text-amber-200 truncate">{item.v}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-2 mb-5 text-center">
+            <div className="grid grid-cols-3 gap-2 mb-4 text-center">
               {[
                 { l: t.pvFCFs,  v: `${fmtPx(result.pvOfFCFs         * convFactor / 1000)}B` },
                 { l: t.termVal, v: `${fmtPx(result.pvOfTerminalValue * convFactor / 1000)}B` },
                 { l: t.ev,      v: `${fmtPx(result.enterpriseValue   * convFactor / 1000)}B` },
               ].map(item => (
-                <div key={item.l} className="bg-gray-800/30 rounded-xl p-2.5">
-                  <p className="text-[10px] text-gray-600 mb-1">{item.l}</p>
-                  <p className="text-sm font-bold text-gray-200">{item.v}</p>
+                <div key={item.l} className="bg-gray-800/30 rounded-xl p-2 sm:p-2.5">
+                  <p className="text-[9px] sm:text-[10px] text-gray-600 mb-1">{item.l}</p>
+                  <p className="text-xs sm:text-sm font-bold text-gray-200 truncate">{item.v}</p>
                 </div>
               ))}
             </div>
@@ -378,7 +440,7 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
         </>
       )}
 
-      {/* 슬라이더 — unavailable 시에도 표시 (API 키 없이는 DCF 파라미터 확인 목적) */}
+      {/* 슬라이더 영역 — unavailable 시에도 표시 */}
       <div className="border-t border-gray-800 pt-4 space-y-4 mt-auto">
         <div className="flex items-center gap-2 mb-3">
           <SlidersHorizontal className="w-3.5 h-3.5 text-blue-400" />
@@ -389,28 +451,39 @@ function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
               growthRate:         company.defaultGrowthRate,
               discountRate:       company.defaultWACC,
               terminalGrowthRate: company.defaultTerminalGrowth,
-            })}>
+            })}
+          >
             {t.dcfReset}
           </button>
         </div>
-        <ParamSlider label={t.growthRate} sub={t.growthSub}
+
+        <ParamSlider
+          label={t.growthRate} sub={t.growthSub}
           value={params.growthRate} min={0.01} max={0.40} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
           onChange={v => onParamChange({ growthRate: v })}
           color="text-blue-400" barColor="bg-blue-400"
-          helpText={t.growthRateHelp} />
-        <ParamSlider label={t.wacc} sub={t.waccSub}
+          helpText={t.growthRateHelp} helpId="growthRate"
+          activeTooltip={activeTooltip} setActiveTooltip={setActiveTooltip}
+        />
+        <ParamSlider
+          label={t.wacc} sub={t.waccSub}
           value={params.discountRate} min={0.05} max={0.15} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
           onChange={v => onParamChange({ discountRate: v })}
           color="text-purple-400" barColor="bg-purple-400"
-          helpText={t.waccHelp} />
-        <ParamSlider label={t.termGrowth} sub={t.termSub}
+          helpText={t.waccHelp} helpId="wacc"
+          activeTooltip={activeTooltip} setActiveTooltip={setActiveTooltip}
+        />
+        <ParamSlider
+          label={t.termGrowth} sub={t.termSub}
           value={params.terminalGrowthRate} min={0.005} max={0.05} step={0.005}
           format={v => `${(v * 100).toFixed(1)}%`}
           onChange={v => onParamChange({ terminalGrowthRate: v })}
           color="text-amber-400" barColor="bg-amber-400"
-          helpText={t.termGrowthHelp} />
+          helpText={t.termGrowthHelp} helpId="termGrowth"
+          activeTooltip={activeTooltip} setActiveTooltip={setActiveTooltip}
+        />
       </div>
     </div>
   );
@@ -430,15 +503,17 @@ function MetricCard({ label, value, industryAvg, unit, description, higherIsBett
   const barWidth   = Math.min((value / (industryAvg * 2)) * 100, 100);
 
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5 hover:border-blue-500/40 hover:shadow-lg hover:shadow-blue-500/5 transition-all duration-300">
-      <div className="flex items-start justify-between mb-4">
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-5 hover:border-blue-500/40 hover:shadow-lg hover:shadow-blue-500/5 transition-all duration-300">
+      <div className="flex items-start justify-between mb-3 sm:mb-4">
         <div>
-          <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold">{label}</p>
-          <p className="text-3xl font-bold text-white mt-1.5 leading-none">{display}</p>
+          <p className="text-[10px] sm:text-[11px] text-gray-500 uppercase tracking-widest font-semibold">{label}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-1.5 leading-none">{display}</p>
         </div>
-        <span className={cn('text-[11px] px-2.5 py-1 rounded-full font-bold',
+        <span className={cn(
+          'text-[10px] sm:text-[11px] px-2 sm:px-2.5 py-1 rounded-full font-bold flex-shrink-0 ml-2',
           isGood ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
-                 : 'bg-rose-500/15 text-rose-400 border border-rose-500/20')}>
+                 : 'bg-rose-500/15 text-rose-400 border border-rose-500/20',
+        )}>
           {isGood ? t.metricGood : t.metricCaution}
         </span>
       </div>
@@ -446,21 +521,23 @@ function MetricCard({ label, value, industryAvg, unit, description, higherIsBett
         <div className="absolute top-0 text-[10px] text-gray-600 transform -translate-x-1/2" style={{ left: '50%' }}>
           {t.industryAvg} ({indDisplay})
         </div>
-        <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden relative">
-          <div className={cn('h-full rounded-full transition-all duration-700 ease-out',
-            isGood ? 'bg-gradient-to-r from-blue-600 to-blue-400'
-                   : 'bg-gradient-to-r from-amber-600 to-amber-400')}
-            style={{ width: `${barWidth}%` }} />
+        <div className="h-2 sm:h-2.5 bg-gray-800 rounded-full overflow-hidden relative">
+          <div
+            className={cn('h-full rounded-full transition-all duration-700 ease-out',
+              isGood ? 'bg-gradient-to-r from-blue-600 to-blue-400'
+                     : 'bg-gradient-to-r from-amber-600 to-amber-400')}
+            style={{ width: `${barWidth}%` }}
+          />
         </div>
         <div className="absolute top-5 h-2.5 w-px bg-gray-500" style={{ left: '50%' }} />
       </div>
-      <div className="flex items-center justify-between text-xs mt-4">
-        <span className="text-gray-500">{t.industryAvg} <span className="text-gray-300 font-medium">{indDisplay}</span></span>
+      <div className="flex items-center justify-between text-xs mt-3 sm:mt-4">
+        <span className="text-gray-500 text-[10px] sm:text-xs">{t.industryAvg} <span className="text-gray-300 font-medium">{indDisplay}</span></span>
         <span className={cn('font-bold', isGood ? 'text-emerald-400' : 'text-rose-400')}>
           {isGood ? (higherIsBetter ? '▲' : '▼') : (higherIsBetter ? '▼' : '▲')} {diffPct.toFixed(1)}%
         </span>
       </div>
-      <p className="text-[11px] text-gray-600 mt-3 pt-3 border-t border-gray-800 leading-relaxed">{description}</p>
+      <p className="text-[10px] sm:text-[11px] text-gray-600 mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-gray-800 leading-relaxed">{description}</p>
     </div>
   );
 }
@@ -476,34 +553,36 @@ function FinancialHealth({ company, t }: { company: CompanyFundamentals; t: Dash
     { label: t.netMargin,       value: f.netMargin,       grad: 'from-emerald-500 to-emerald-400', text: 'text-emerald-400' },
   ];
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5 h-full flex flex-col">
-      <h3 className="text-white font-bold text-base flex items-center gap-2 mb-5">
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-5 h-full flex flex-col">
+      <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2 mb-4 sm:mb-5">
         <Activity className="w-4 h-4 text-blue-400" />
         {t.healthTitle}
       </h3>
       <div className="space-y-4 flex-1">
         {margins.map(m => (
           <div key={m.label}>
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex justify-between items-center mb-1.5 sm:mb-2">
               <span className="text-xs text-gray-400">{m.label}</span>
               <span className={cn('text-sm font-bold', m.text)}>{m.value.toFixed(1)}%</span>
             </div>
             <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-              <div className={cn('h-full rounded-full bg-gradient-to-r transition-all duration-700', m.grad)}
-                style={{ width: `${Math.min(m.value, 100)}%` }} />
+              <div
+                className={cn('h-full rounded-full bg-gradient-to-r transition-all duration-700', m.grad)}
+                style={{ width: `${Math.min(m.value, 100)}%` }}
+              />
             </div>
           </div>
         ))}
       </div>
-      <div className="mt-5 pt-5 border-t border-gray-800 grid grid-cols-3 gap-2">
+      <div className="mt-4 sm:mt-5 pt-4 sm:pt-5 border-t border-gray-800 grid grid-cols-3 gap-2">
         {[
           { label: t.divYield,     value: f.dividendYield === 0 ? t.noDiv : `${f.dividendYield.toFixed(2)}%` },
           { label: t.debtToEquity, value: f.debtToEquity.toFixed(2) },
           { label: t.currentRatio, value: f.currentRatio.toFixed(2) },
         ].map(item => (
-          <div key={item.label} className="bg-gray-800/50 rounded-xl p-3 text-center">
-            <p className="text-[10px] text-gray-500 mb-1 leading-tight">{item.label}</p>
-            <p className="text-sm font-bold text-white">{item.value}</p>
+          <div key={item.label} className="bg-gray-800/50 rounded-xl p-2 sm:p-3 text-center">
+            <p className="text-[9px] sm:text-[10px] text-gray-500 mb-1 leading-tight">{item.label}</p>
+            <p className="text-xs sm:text-sm font-bold text-white">{item.value}</p>
           </div>
         ))}
       </div>
@@ -521,7 +600,6 @@ function AIScoreWidget({ company, params, chartData, t }: {
   t: DashboardT;
 }) {
   const aiScore = useMemo(() => {
-    // 하이브리드 엔진으로 적정가 산출 (DCF → EPS-PER → unavailable 순)
     const hybrid = calculateHybridValuation({
       fcf:               company.fcf,
       shares:            company.shares,
@@ -530,7 +608,6 @@ function AIScoreWidget({ company, params, chartData, t }: {
       trailingEps:       company.trailingEps,
       ...params,
     });
-    // 'unavailable' 모델: AI 점수 DCF 항목을 중립(현재가 = 적정가)으로 처리
     const dcfFairForScore = hybrid.model === 'unavailable'
       ? company.currentPrice
       : hybrid.fairValuePerShare;
@@ -546,8 +623,8 @@ function AIScoreWidget({ company, params, chartData, t }: {
     });
   }, [company, params, chartData]);
 
-  const gradeT    = t.aiGrades[aiScore.grade]       ?? aiScore.grade;
-  const feedbackT = t.aiFeedbacks[aiScore.feedback]  ?? aiScore.feedback;
+  const gradeT    = t.aiGrades[aiScore.grade]      ?? aiScore.grade;
+  const feedbackT = t.aiFeedbacks[aiScore.feedback] ?? aiScore.feedback;
 
   const radius = 54;
   const circ   = 2 * Math.PI * radius;
@@ -555,35 +632,39 @@ function AIScoreWidget({ company, params, chartData, t }: {
   const scoreColor = aiScore.score >= 65 ? '#10b981' : aiScore.score >= 45 ? '#f59e0b' : '#ef4444';
 
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6">
-      <h3 className="text-white font-bold text-base flex items-center gap-2 mb-5">
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-6">
+      <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2 mb-4 sm:mb-5">
         <Zap className="w-4 h-4 text-yellow-400" />
         {t.aiTitle}
         <span className="ml-auto text-[10px] text-gray-600 flex items-center gap-1">
           <Info className="w-3 h-3" /> {t.aiSubLabel}
         </span>
       </h3>
-      <div className="flex flex-col sm:flex-row gap-6 items-center">
+
+      <div className="flex flex-col sm:flex-row gap-5 sm:gap-6 items-center">
+        {/* 원형 점수 게이지 */}
         <div className="relative flex-shrink-0">
-          <svg width="140" height="140" className="-rotate-90">
-            <circle cx="70" cy="70" r={radius} fill="none" stroke="#1f2937" strokeWidth="10" />
-            <circle cx="70" cy="70" r={radius} fill="none" stroke={scoreColor} strokeWidth="10"
+          <svg width="130" height="130" className="-rotate-90 sm:w-[140px] sm:h-[140px]">
+            <circle cx="65" cy="65" r={radius} fill="none" stroke="#1f2937" strokeWidth="10" />
+            <circle cx="65" cy="65" r={radius} fill="none" stroke={scoreColor} strokeWidth="10"
               strokeDasharray={`${dash} ${circ - dash}`} strokeLinecap="round"
               style={{ transition: 'stroke-dasharray 0.8s ease, stroke 0.4s ease' }} />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-4xl font-black text-white">{aiScore.score}</span>
+            <span className="text-3xl sm:text-4xl font-black text-white">{aiScore.score}</span>
             <span className="text-xs text-gray-500 -mt-1">/ 100</span>
           </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className={cn('text-2xl font-extrabold mb-2', aiScore.gradeColor)}>{gradeT}</p>
+
+        <div className="flex-1 min-w-0 w-full">
+          <p className={cn('text-xl sm:text-2xl font-extrabold mb-2', aiScore.gradeColor)}>{gradeT}</p>
           <div className="bg-gray-800/50 rounded-xl p-3 text-xs text-gray-300 leading-relaxed border border-gray-700/50">
             💡 {feedbackT}
           </div>
         </div>
       </div>
-      <div className="mt-5 space-y-3">
+
+      <div className="mt-4 sm:mt-5 space-y-3">
         {aiScore.breakdown.map(item => {
           const pct    = (item.points / item.maxPoints) * 100;
           const barCol = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-rose-500';
@@ -616,24 +697,24 @@ function PriceChart({ rows, fmtPx, t }: {
   rows: ChartRow[]; fmtPx: (v: number) => string; t: DashboardT;
 }) {
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <h3 className="text-white font-bold text-base">{t.priceChartTitle}</h3>
-        <div className="flex items-center gap-4 text-xs">
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-3 sm:p-5">
+      <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
+        <h3 className="text-white font-bold text-sm sm:text-base">{t.priceChartTitle}</h3>
+        <div className="flex items-center gap-3 sm:gap-4 text-xs">
           {[
             { color: 'bg-blue-400',   label: t.close },
             { color: 'bg-orange-400', label: 'SMA20' },
             { color: 'bg-red-400',    label: 'SMA60' },
           ].map(({ color, label }) => (
             <span key={label} className="flex items-center gap-1.5">
-              <span className={cn('w-4 h-0.5 inline-block rounded', color)} />
-              <span className="text-gray-400">{label}</span>
+              <span className={cn('w-3 sm:w-4 h-0.5 inline-block rounded', color)} />
+              <span className="text-gray-400 text-[11px] sm:text-xs">{label}</span>
             </span>
           ))}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ResponsiveContainer width="100%" height={260}>
+        <ComposedChart data={rows} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%"   stopColor="#3b82f6" stopOpacity={0.25} />
@@ -641,10 +722,10 @@ function PriceChart({ rows, fmtPx, t }: {
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#1a2535" vertical={false} />
-          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }}
+          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 10 }}
             tickLine={false} axisLine={false} interval={14} />
-          <YAxis tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
-            tickFormatter={(v: number) => fmtPx(v)} domain={['auto', 'auto']} width={72} />
+          <YAxis tick={{ fill: '#4b5563', fontSize: 10 }} tickLine={false} axisLine={false}
+            tickFormatter={(v: number) => fmtPx(v)} domain={['auto', 'auto']} width={64} />
           <Tooltip content={<PriceTooltip t={t} fmtPx={fmtPx} />} />
           <Area type="monotone" dataKey="close" fill="url(#priceGrad)"
             stroke="#3b82f6" strokeWidth={2} dot={false} />
@@ -669,22 +750,22 @@ function RSIChart({ data, t }: { data: MockDataResult; t: DashboardT }) {
     ? { text: t.oversold,   c: 'text-emerald-400', b: 'bg-emerald-500/10', bd: 'border-emerald-500/30' }
     : { text: t.neutralZone, c: 'text-gray-300',   b: 'bg-gray-700/30',    bd: 'border-gray-600/30' };
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h3 className="text-white font-bold text-base">
-          {t.rsiTitle} <span className="text-gray-500 font-normal text-sm">{t.rsiSub}</span>
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-3 sm:p-5">
+      <div className="flex items-center justify-between mb-2 sm:mb-3 flex-wrap gap-2">
+        <h3 className="text-white font-bold text-sm sm:text-base">
+          {t.rsiTitle} <span className="text-gray-500 font-normal text-xs sm:text-sm">{t.rsiSub}</span>
         </h3>
-        <div className={cn('text-xs font-bold px-3 py-1 rounded-full border', zone.b, zone.bd, zone.c)}>
+        <div className={cn('text-xs font-bold px-2.5 sm:px-3 py-1 rounded-full border', zone.b, zone.bd, zone.c)}>
           RSI {rsiVal.toFixed(1)} · {zone.text}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={170}>
-        <ComposedChart data={data.chartRows} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
+      <ResponsiveContainer width="100%" height={160}>
+        <ComposedChart data={data.chartRows} margin={{ top: 5, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1a2535" vertical={false} />
-          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }}
+          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 10 }}
             tickLine={false} axisLine={false} interval={14} />
-          <YAxis domain={[0, 100]} tick={{ fill: '#4b5563', fontSize: 11 }}
-            tickLine={false} axisLine={false} ticks={[0, 30, 50, 70, 100]} width={28} />
+          <YAxis domain={[0, 100]} tick={{ fill: '#4b5563', fontSize: 10 }}
+            tickLine={false} axisLine={false} ticks={[0, 30, 50, 70, 100]} width={24} />
           <Tooltip content={<RSITooltip t={t} />} />
           <ReferenceArea y1={70} y2={100} fill="#ef4444" fillOpacity={0.07} />
           <ReferenceArea y1={0}  y2={30}  fill="#10b981" fillOpacity={0.07} />
@@ -704,12 +785,12 @@ function RSIChart({ data, t }: { data: MockDataResult; t: DashboardT }) {
  * ═══════════════════════════════════════════════════════════════ */
 function MACDChart({ data, t }: { data: MockDataResult; t: DashboardT }) {
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-5">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h3 className="text-white font-bold text-base">
-          {t.macdTitle} <span className="text-gray-500 font-normal text-sm">{t.macdSub}</span>
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-3 sm:p-5">
+      <div className="flex items-center justify-between mb-2 sm:mb-3 flex-wrap gap-2">
+        <h3 className="text-white font-bold text-sm sm:text-base">
+          {t.macdTitle} <span className="text-gray-500 font-normal text-xs sm:text-sm">{t.macdSub}</span>
         </h3>
-        <div className="flex items-center gap-3 text-[11px]">
+        <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
           {[
             { c: 'bg-blue-400',       l: 'MACD' },
             { c: 'bg-orange-400',     l: 'Signal' },
@@ -723,16 +804,16 @@ function MACDChart({ data, t }: { data: MockDataResult; t: DashboardT }) {
           ))}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={170}>
-        <ComposedChart data={data.chartRows} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
+      <ResponsiveContainer width="100%" height={160}>
+        <ComposedChart data={data.chartRows} margin={{ top: 5, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1a2535" vertical={false} />
-          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 11 }}
+          <XAxis dataKey="date" tick={{ fill: '#4b5563', fontSize: 10 }}
             tickLine={false} axisLine={false} interval={14} />
-          <YAxis tick={{ fill: '#4b5563', fontSize: 11 }} tickLine={false} axisLine={false}
-            width={50} tickFormatter={(v: number) => v.toFixed(1)} />
+          <YAxis tick={{ fill: '#4b5563', fontSize: 10 }} tickLine={false} axisLine={false}
+            width={44} tickFormatter={(v: number) => v.toFixed(1)} />
           <Tooltip content={<MACDTooltip />} />
           <ReferenceLine y={0} stroke="#374151" strokeOpacity={0.8} />
-          <Bar dataKey="histogram" maxBarSize={6} radius={[2, 2, 0, 0]}>
+          <Bar dataKey="histogram" maxBarSize={5} radius={[2, 2, 0, 0]}>
             {data.chartRows.map((entry, idx) => (
               <Cell key={idx} fill={(entry.histogram ?? 0) >= 0 ? '#10b981' : '#ef4444'}
                 fillOpacity={0.75} />
@@ -766,19 +847,17 @@ function ProfileCard({ company, note, onRefresh, isLoading, t, fmtPx, convFactor
     ? Math.round(((company.currentPrice - company.week52Low) / range) * 100)
     : 50;
 
-  // 표시 통화로 변환한 가격 포맷 헬퍼
   const dispPrice  = fmtPx(company.currentPrice * convFactor);
   const dispChange = (() => {
-    const v = company.change * convFactor;
+    const v    = company.change * convFactor;
     const sign = v >= 0 ? '+' : '';
-    const absStr = fmtPx(Math.abs(v));
-    return `${sign}${absStr}`;
+    return `${sign}${fmtPx(Math.abs(v))}`;
   })();
   const dispW52H = fmtPx(company.week52High * convFactor);
   const dispW52L = fmtPx(company.week52Low  * convFactor);
 
   return (
-    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-6">
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-6">
       {note && (
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
           <WifiOff className="w-3.5 h-3.5 flex-shrink-0" />
@@ -786,15 +865,15 @@ function ProfileCard({ company, note, onRefresh, isLoading, t, fmtPx, convFactor
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row lg:items-start gap-6">
+      <div className="flex flex-col md:flex-row md:items-start gap-4 sm:gap-6">
         {/* 기업명 & 설명 */}
-        <div className="flex items-start gap-4 flex-1 min-w-0">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600/30 to-purple-600/30 border border-gray-700 flex items-center justify-center flex-shrink-0">
-            <Building2 className="w-7 h-7 text-blue-400" />
+        <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-blue-600/30 to-purple-600/30 border border-gray-700 flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-6 h-6 sm:w-7 sm:h-7 text-blue-400" />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold text-white">{company.name}</h1>
+              <h1 className="text-lg sm:text-xl font-bold text-white">{company.name}</h1>
               <span className="text-xs text-blue-300 bg-blue-500/15 border border-blue-500/25 px-2 py-0.5 rounded-full font-semibold">
                 {company.ticker}
               </span>
@@ -803,37 +882,41 @@ function ProfileCard({ company, note, onRefresh, isLoading, t, fmtPx, convFactor
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-1">{company.sector} · {company.industry}</p>
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed max-w-2xl">{company.description}</p>
+            <p className="text-xs text-gray-600 mt-1.5 sm:mt-2 leading-relaxed max-w-2xl line-clamp-2 sm:line-clamp-none">{company.description}</p>
           </div>
         </div>
 
         {/* 가격 & 52주 범위 */}
-        <div className="lg:text-right flex-shrink-0">
-          <div className="flex items-baseline gap-3 lg:justify-end">
-            <span className="text-4xl font-bold text-white tracking-tight">
+        <div className="md:text-right flex-shrink-0">
+          <div className="flex items-baseline gap-2 sm:gap-3 md:justify-end flex-wrap">
+            <span className="text-2xl sm:text-3xl md:text-4xl font-bold text-white tracking-tight">
               {dispPrice}
             </span>
-            <div className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold',
+            <div className={cn(
+              'flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs sm:text-sm font-bold',
               isPos ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
-                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/25')}>
-              {isPos ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
-              {dispChange} ({isPos ? '+' : ''}{company.changePercent.toFixed(2)}%)
+                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/25',
+            )}>
+              {isPos ? <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <ArrowDownRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              <span className="whitespace-nowrap">{dispChange} ({isPos ? '+' : ''}{company.changePercent.toFixed(2)}%)</span>
             </div>
           </div>
-          <div className="mt-3 lg:flex lg:flex-col lg:items-end">
-            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1.5 lg:justify-end">
-              <span>{dispW52L}</span>
-              <span className="text-gray-600">{t.week52Range}</span>
-              <span>{dispW52H}</span>
+
+          <div className="mt-2 sm:mt-3 md:flex md:flex-col md:items-end">
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1.5 md:justify-end">
+              <span className="text-[11px]">{dispW52L}</span>
+              <span className="text-gray-600 text-[10px]">{t.week52Range}</span>
+              <span className="text-[11px]">{dispW52H}</span>
             </div>
-            <div className="w-full lg:w-52 h-2 bg-gray-800 rounded-full overflow-hidden">
+            <div className="w-full md:w-48 h-1.5 sm:h-2 bg-gray-800 rounded-full overflow-hidden">
               <div className="h-full rounded-full bg-gradient-to-r from-rose-500 via-amber-500 to-emerald-500"
                 style={{ width: `${curPct}%` }} />
             </div>
             <p className="text-[11px] text-gray-600 mt-1">{t.week52Pos(curPct)}</p>
           </div>
+
           <button onClick={onRefresh} disabled={isLoading}
-            className="mt-3 flex items-center gap-1.5 text-[11px] text-gray-600 hover:text-gray-300 transition-colors ml-auto disabled:opacity-40">
+            className="mt-2 sm:mt-3 flex items-center gap-1.5 text-[11px] text-gray-600 hover:text-gray-300 transition-colors md:ml-auto disabled:opacity-40">
             <RefreshCw className={cn('w-3 h-3', isLoading && 'animate-spin')} />
             {t.dataRefresh}
           </button>
@@ -841,20 +924,20 @@ function ProfileCard({ company, note, onRefresh, isLoading, t, fmtPx, convFactor
       </div>
 
       {/* 요약 지표 4개 */}
-      <div className="mt-5 pt-5 border-t border-gray-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="mt-4 sm:mt-5 pt-4 sm:pt-5 border-t border-gray-800/80 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {[
           { label: t.marketCap, value: company.marketCap, Icon: DollarSign, accent: 'text-blue-400' },
           { label: t.peRatio,   value: `${company.per}x`,  Icon: BarChart2,  accent: 'text-purple-400' },
           { label: t.volume,    value: company.volume,     Icon: Activity,   accent: 'text-emerald-400' },
           { label: t.employees, value: company.employees,  Icon: Users,      accent: 'text-amber-400' },
         ].map(({ label, value, Icon, accent }) => (
-          <div key={label} className="flex items-center gap-3">
-            <div className={cn('w-9 h-9 rounded-xl bg-gray-800/70 flex items-center justify-center flex-shrink-0', accent)}>
-              <Icon className="w-4 h-4" />
+          <div key={label} className="flex items-center gap-2 sm:gap-3">
+            <div className={cn('w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gray-800/70 flex items-center justify-center flex-shrink-0', accent)}>
+              <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </div>
-            <div>
-              <p className="text-[11px] text-gray-500">{label}</p>
-              <p className="text-sm font-bold text-white">{value}</p>
+            <div className="min-w-0">
+              <p className="text-[10px] sm:text-[11px] text-gray-500">{label}</p>
+              <p className="text-xs sm:text-sm font-bold text-white truncate">{value}</p>
             </div>
           </div>
         ))}
@@ -881,7 +964,7 @@ function SectionDivider({ label }: { label: string }) {
  * ═══════════════════════════════════════════════════════════════ */
 function LoadingScreen({ ticker, t }: { ticker: string; t: DashboardT }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-5"
+    <div className="min-h-screen flex flex-col items-center justify-center gap-5 px-4"
       style={{ backgroundColor: '#060d1a' }}>
       <div className="relative">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-xl shadow-blue-500/30">
@@ -910,15 +993,15 @@ function ErrorScreen({ ticker, message, onRetry, t }: {
   ticker: string; message: string; onRetry: () => void; t: DashboardT;
 }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-6"
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-4"
       style={{ backgroundColor: '#060d1a' }}>
       <div className="w-20 h-20 rounded-3xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
         <ServerCrash className="w-10 h-10 text-rose-400" />
       </div>
-      <div className="text-center max-w-md px-4">
-        <p className="text-white font-extrabold text-2xl tracking-tight">{t.errorTitle}</p>
+      <div className="text-center max-w-md w-full">
+        <p className="text-white font-extrabold text-xl sm:text-2xl tracking-tight">{t.errorTitle}</p>
         <p className="text-gray-400 text-sm mt-2">{t.errorSubtitle(ticker)}</p>
-        <div className="mt-4 bg-gray-900/80 border border-gray-800 rounded-2xl px-5 py-4 text-left space-y-1">
+        <div className="mt-4 bg-gray-900/80 border border-gray-800 rounded-2xl px-4 sm:px-5 py-4 text-left space-y-1">
           <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">
             {t.errorDetail}
           </p>
@@ -989,7 +1072,6 @@ export default function StockDashboard() {
       }
       const data: StockData = await res.json();
       setStockData(data);
-      // 종목 원본 통화로 표시 통화 자동 설정
       setDisplayCurrency((data.currency ?? 'USD') === 'KRW' ? 'KRW' : 'USD');
       setDcfParams({
         growthRate:         data.defaultGrowthRate,
@@ -1003,7 +1085,6 @@ export default function StockDashboard() {
     }
   }, []);
 
-  /* ── 최초 마운트: AAPL ──────────────────────── */
   useEffect(() => { fetchStockData('AAPL'); }, [fetchStockData]);
 
   const handleSearch = useCallback(() => {
@@ -1025,7 +1106,7 @@ export default function StockDashboard() {
     return 1;
   }, [stockData, displayCurrency]);
 
-  /* ── 가격 포맷 (이미 변환된 값 → 통화 심볼 + 숫자) ── */
+  /* ── 가격 포맷 ──────────────────────────────── */
   const fmtPx = useCallback((v: number): string => {
     if (displayCurrency === 'KRW') return `₩${Math.round(v).toLocaleString()}`;
     return `$${v.toFixed(2)}`;
@@ -1046,17 +1127,11 @@ export default function StockDashboard() {
     }));
   }, [stockData, convFactor]);
 
-  /* ── 로딩 화면 ──────────────────────────────── */
-  if (!stockData && isLoading)
-    return <LoadingScreen ticker={lastTicker} t={t} />;
-
-  /* ── 에러 화면 ──────────────────────────────── */
-  if (!stockData && apiError)
-    return <ErrorScreen ticker={lastTicker} message={apiError} onRetry={() => fetchStockData(lastTicker)} t={t} />;
-
+  /* ── 화면 분기 ──────────────────────────────── */
+  if (!stockData && isLoading)  return <LoadingScreen ticker={lastTicker} t={t} />;
+  if (!stockData && apiError)   return <ErrorScreen ticker={lastTicker} message={apiError} onRetry={() => fetchStockData(lastTicker)} t={t} />;
   if (!stockData) return null;
 
-  /* ── 컴포넌트 prop 추출 ─────────────────────── */
   const company: CompanyFundamentals = stockData;
   const chartData: MockDataResult = {
     chartRows:   stockData.chartRows,
@@ -1067,82 +1142,109 @@ export default function StockDashboard() {
   };
   const activeTicker = stockData.ticker;
 
+  /* ─────── 검색 입력 UI (모바일/데스크톱 공용) ─────── */
+  const searchUI = (
+    <>
+      <div className="relative flex-1">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+        <input
+          type="text"
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSearch()}
+          placeholder={t.searchPlaceholder}
+          className="w-full pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 rounded-xl border outline-none transition-colors"
+          style={{ backgroundColor: '#111827', borderColor: '#1f2d3d' }}
+        />
+      </div>
+      <button
+        onClick={handleSearch}
+        disabled={isLoading}
+        className="px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 disabled:opacity-60 flex items-center gap-1.5"
+        style={{ backgroundColor: '#2563eb' }}
+      >
+        {isLoading
+          ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" />{t.searching}</>
+          : t.searchBtn}
+      </button>
+    </>
+  );
+
   /* ═══════════════════════════════════════════════
    * RENDER
    * ═══════════════════════════════════════════════ */
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#060d1a', color: 'white' }}>
 
-      {/* ── HEADER ─────────────────────────────── */}
-      <header style={{ borderBottom: '1px solid #1a2535', backgroundColor: 'rgba(6,13,26,0.92)' }}
-        className="sticky top-0 z-50 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-4">
+      {/* ── HEADER ─────────────────────────────────────────────── */}
+      <header
+        style={{ borderBottom: '1px solid #1a2535', backgroundColor: 'rgba(6,13,26,0.92)' }}
+        className="sticky top-0 z-50 backdrop-blur-md"
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
 
-          {/* 로고 */}
-          <div className="flex items-center gap-2.5 flex-shrink-0">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
-              <BarChart2 className="w-4 h-4 text-white" />
+          {/*
+           * 레이아웃 전략:
+           * · 모바일(< sm): 1행 = 로고 + 우측 버튼, 2행 = 검색창(전체 너비)
+           * · sm+         : 1행 = 로고 + 검색창 + 우측 버튼
+           *
+           * flex-wrap + order-last(검색) 조합으로 2행 분기
+           */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+
+            {/* 로고 */}
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
+                <BarChart2 className="w-4 h-4 text-white" />
+              </div>
+              <span className="font-extrabold text-white text-lg tracking-tight">Stock-er</span>
+              <span className="hidden sm:inline-flex text-[11px] text-blue-300 border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 rounded-full font-medium">
+                {t.brandTag}
+              </span>
             </div>
-            <span className="font-extrabold text-white text-lg tracking-tight">Stock-er</span>
-            <span className="hidden sm:inline-flex text-[11px] text-blue-300 border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 rounded-full font-medium">
-              {t.brandTag}
-            </span>
-          </div>
 
-          {/* 검색창 */}
-          <div className="flex gap-2 flex-1 max-w-sm">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
-              <input
-                type="text"
-                value={searchInput}
-                onChange={e => setSearchInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder={t.searchPlaceholder}
-                className="w-full pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 rounded-xl border outline-none transition-colors"
-                style={{ backgroundColor: '#111827', borderColor: '#1f2d3d' }}
-              />
+            {/*
+             * 검색창
+             * · 모바일: order-last → 로고/버튼 아래 행, w-full
+             * · sm+  : order-none → 로고 다음, flex-1 max-w-sm
+             */}
+            <div className="order-last w-full flex gap-2 sm:order-none sm:w-auto sm:flex-1 sm:max-w-sm">
+              {searchUI}
             </div>
-            <button onClick={handleSearch} disabled={isLoading}
-              className="px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 disabled:opacity-60 flex items-center gap-1.5"
-              style={{ backgroundColor: '#2563eb' }}>
-              {isLoading
-                ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> {t.searching}</>
-                : t.searchBtn}
-            </button>
-          </div>
 
-          {/* 우측 도구: 통화 토글 + 언어 토글 + QA */}
-          <div className="flex items-center gap-2 ml-auto">
-            {/* KRW / USD 통화 토글 (데이터 있을 때만 표시) */}
-            {stockData && (
+            {/* 우측 도구 */}
+            <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
+              {/* 통화 토글 */}
+              {stockData && (
+                <button
+                  onClick={() => setDisplayCurrency(prev => prev === 'KRW' ? 'USD' : 'KRW')}
+                  className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold border transition-all hover:border-emerald-500/50 hover:text-emerald-300"
+                  style={{ backgroundColor: '#111827', borderColor: '#1f2d3d', color: '#9ca3af' }}
+                  title="Toggle display currency"
+                >
+                  {displayCurrency === 'KRW' ? t.currencyToggleToUSD : t.currencyToggleToKRW}
+                </button>
+              )}
+
+              {/* 언어 토글 */}
               <button
-                onClick={() => setDisplayCurrency(prev => prev === 'KRW' ? 'USD' : 'KRW')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all hover:border-emerald-500/50 hover:text-emerald-300"
+                onClick={toggleLang}
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold border transition-all hover:border-blue-500/50 hover:text-blue-300"
                 style={{ backgroundColor: '#111827', borderColor: '#1f2d3d', color: '#9ca3af' }}
-                title="Toggle display currency">
-                {displayCurrency === 'KRW' ? t.currencyToggleToUSD : t.currencyToggleToKRW}
+                title="Switch language / 언어 변경"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span className="hidden xs:inline">{lang === 'ko' ? 'EN' : '한국어'}</span>
+                <span className="xs:hidden">{lang === 'ko' ? 'EN' : 'KO'}</span>
               </button>
-            )}
-            {/* KO / EN 토글 */}
-            <button onClick={toggleLang}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all hover:border-blue-500/50 hover:text-blue-300"
-              style={{
-                backgroundColor: '#111827',
-                borderColor: '#1f2d3d',
-                color: '#9ca3af',
-              }}
-              title="Switch language / 언어 변경">
-              <Globe className="w-3.5 h-3.5" />
-              {lang === 'ko' ? 'EN' : '한국어'}
-            </button>
 
-            {/* QA 링크 */}
-            <Link href="/admin/test-harness"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-300 border border-gray-800 hover:border-gray-600 transition-colors">
-              <FlaskConical className="w-3.5 h-3.5" />
-              {t.qaLink}
-            </Link>
+              {/* QA 링크 (sm+에서만 표시) */}
+              <Link href="/admin/test-harness"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-300 border border-gray-800 hover:border-gray-600 transition-colors">
+                <FlaskConical className="w-3.5 h-3.5" />
+                {t.qaLink}
+              </Link>
+            </div>
           </div>
         </div>
       </header>
@@ -1162,8 +1264,11 @@ export default function StockDashboard() {
               {t.bannerLink}
             </Link>
           </p>
-          <button onClick={() => setBannerVisible(false)} aria-label="배너 닫기"
-            className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-amber-500/70 hover:text-amber-300 hover:bg-amber-500/15 transition-colors">
+          <button
+            onClick={() => setBannerVisible(false)}
+            aria-label="배너 닫기"
+            className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-amber-500/70 hover:text-amber-300 hover:bg-amber-500/15 transition-colors"
+          >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -1171,14 +1276,14 @@ export default function StockDashboard() {
 
       {/* ── 로딩 오버레이 (데이터 교체 시) ─────── */}
       {isLoading && stockData && (
-        <div className="fixed top-16 left-0 right-0 z-40 flex items-center justify-center py-2 bg-blue-600/90 backdrop-blur-sm">
+        <div className="fixed top-[57px] sm:top-16 left-0 right-0 z-40 flex items-center justify-center py-2 bg-blue-600/90 backdrop-blur-sm">
           <RefreshCw className="w-3.5 h-3.5 animate-spin mr-2" />
           <span className="text-xs font-medium text-white">{t.loadingOverlay(lastTicker)}</span>
         </div>
       )}
 
       {/* ── MAIN ────────────────────────────────── */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
 
         <ProfileCard
           company={company}
@@ -1198,7 +1303,7 @@ export default function StockDashboard() {
             { key: 'technical'   as const, label: t.tabTechnical },
           ]).map(({ key, label }) => (
             <button key={key} onClick={() => setActiveTab(key)}
-              className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all"
+              className="px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all"
               style={{
                 backgroundColor: activeTab === key ? '#2563eb' : 'transparent',
                 color: activeTab === key ? 'white' : '#6b7280',
@@ -1208,11 +1313,13 @@ export default function StockDashboard() {
           ))}
         </div>
 
-        {/* ── 펀더멘탈 탭 ────────────────────────── */}
+        {/* ── 펀더멘탈 탭 ─────────────────────────── */}
         {activeTab === 'fundamental' && (
-          <div className="space-y-5">
+          <div className="space-y-4 sm:space-y-5">
             <SectionDivider label={t.secMetrics} />
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+
+            {/* 밸류에이션 지표 4개 — 모바일 1열, md 2열, lg 4열 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <MetricCard t={t} label={t.perLabel} value={company.per}
                 industryAvg={company.industryPer} unit="x" description={t.perDesc}
                 higherIsBetter={false} />
@@ -1228,9 +1335,18 @@ export default function StockDashboard() {
             </div>
 
             <SectionDivider label={t.secDCF} />
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-              <div className="lg:col-span-2">
-                <DCFGauge company={company} params={dcfParams} onParamChange={updateParam} t={t} fmtPx={fmtPx} convFactor={convFactor} />
+
+            {/* DCF + 재무건전성 — 모바일 1열, md 3열 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+              <div className="md:col-span-2">
+                <DCFGauge
+                  company={company}
+                  params={dcfParams}
+                  onParamChange={updateParam}
+                  t={t}
+                  fmtPx={fmtPx}
+                  convFactor={convFactor}
+                />
               </div>
               <FinancialHealth company={company} t={t} />
             </div>
@@ -1240,9 +1356,9 @@ export default function StockDashboard() {
           </div>
         )}
 
-        {/* ── 기술적 차트 탭 ─────────────────────── */}
+        {/* ── 기술적 차트 탭 ──────────────────────── */}
         {activeTab === 'technical' && (
-          <div className="space-y-5">
+          <div className="space-y-4 sm:space-y-5">
             <SectionDivider label={t.secAI} />
             <AIScoreWidget company={company} params={dcfParams} chartData={chartData} t={t} />
 
@@ -1250,7 +1366,8 @@ export default function StockDashboard() {
             <PriceChart rows={displayChartRows} fmtPx={fmtPx} t={t} />
 
             <SectionDivider label={t.secIndicators} />
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* RSI + MACD — 모바일 1열, md 2열 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
               <RSIChart  data={chartData} t={t} />
               <MACDChart data={chartData} t={t} />
             </div>
@@ -1259,7 +1376,7 @@ export default function StockDashboard() {
       </main>
 
       {/* ── FOOTER ──────────────────────────────── */}
-      <footer className="mt-12 py-6 text-center" style={{ borderTop: '1px solid #1a2535' }}>
+      <footer className="mt-8 sm:mt-12 py-5 sm:py-6 text-center px-4" style={{ borderTop: '1px solid #1a2535' }}>
         <p className="text-xs text-gray-700">
           Stock-er · {t.footerData} — {t.footerNote} ·{' '}
           <Link href="/admin/test-harness" className="hover:text-gray-500 transition-colors underline">
