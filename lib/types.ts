@@ -25,6 +25,10 @@ export type StockData = CompanyFundamentals &
     fetchedAt: string;
     /** API 키 미설정·Rate Limit 등 사유 메모 */
     note?: string;
+    /** 주식 원본 통화 코드 ('KRW' | 'USD' | …) */
+    currency: string;
+    /** 실시간 USD→KRW 환율 (fallback 1350) */
+    exchangeRate: number;
   };
 
 /** /api/stock의 HTTP 4xx·5xx 에러 응답 타입 */

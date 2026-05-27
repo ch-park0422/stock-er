@@ -66,6 +66,9 @@ export interface CompanyFundamentals {
   grossMargin: number;
   operatingMargin: number;
   netMargin: number;
+
+  /** 주당 순이익 (EPS-PER 폴백 가치평가용 — 실제 API 데이터에서만 제공) */
+  trailingEps?: number;
 }
 
 export const COMPANY_DB: Record<string, CompanyFundamentals> = {

@@ -127,6 +127,104 @@ export function calculateDCF(params: DCFParams): DCFResult {
 }
 
 /* ─────────────────────────────────────────────
+ * 1b. 하이브리드 가치평가 (DCF 우선 → EPS-PER 폴백)
+ * ───────────────────────────────────────────── */
+
+/**
+ * 가치평가에 실제로 적용된 모델
+ * - 'dcf'         : 현금흐름할인 모델
+ * - 'eps'         : EPS × 목표PER 모델 (DCF 데이터 부족 시 폴백)
+ * - 'unavailable' : FCF·EPS 모두 미제공 → 적정가 산출 불가
+ */
+export type ValuationModel = 'dcf' | 'eps' | 'unavailable';
+
+/** calculateHybridValuation 반환 타입 */
+export interface HybridValuationResult extends DCFResult {
+  /** 사용된 평가 모델 */
+  model: ValuationModel;
+  /** EPS 모델 적용 시: 사용된 주당 순이익 */
+  trailingEpsUsed?: number;
+  /** EPS 모델 적용 시: 적용된 목표 PER 배수 */
+  targetPerUsed?: number;
+}
+
+/** calculateHybridValuation 입력 타입 */
+export interface HybridValuationParams extends DCFParams {
+  /** 현재 주가 — DCF 합리성 검증 기준 */
+  currentPrice: number;
+  /** 주당 순이익 (EPS-PER 폴백용) */
+  trailingEps?: number;
+  /** 목표 PER 배수 (기본 12.5) */
+  targetPer?: number;
+}
+
+/**
+ * 하이브리드 가치평가 엔진
+ *
+ * ① DCF: fcf > 0 이고 결과가 현재가의 20% 이상 → DCF 결과 반환
+ * ② EPS-PER: DCF 부적합·데이터 없음 + trailingEps 유효 → EPS×PER 반환
+ * ③ 최후 폴백: 두 경우 모두 해당 없으면 DCF 결과 그대로 반환
+ */
+export function calculateHybridValuation(
+  params: HybridValuationParams,
+): HybridValuationResult {
+  const { currentPrice, trailingEps, targetPer = 12.5, ...dcfParams } = params;
+
+  // 0 이하 현재가 방어 (한국 주식 단위 등 엣지 케이스)
+  const safePrice = currentPrice > 0 ? currentPrice : 1;
+
+  // DCF 가능 여부: fcf·shares 양수 & finite 값
+  const hasDcfData =
+    dcfParams.fcf > 0 &&
+    dcfParams.shares > 0 &&
+    isFinite(dcfParams.fcf) &&
+    isFinite(dcfParams.shares);
+
+  if (hasDcfData) {
+    const dcfResult = calculateDCF(dcfParams);
+    const fv = dcfResult.fairValuePerShare;
+    // 현재가의 20% 이상이면 합리적인 DCF 결과로 간주
+    const isReasonable =
+      isFinite(fv) &&
+      !isNaN(fv) &&
+      fv >= safePrice * 0.20;
+    if (isReasonable) {
+      return { ...dcfResult, model: 'dcf' };
+    }
+  }
+
+  // EPS-PER 폴백
+  if (trailingEps != null && !isNaN(trailingEps) && trailingEps > 0) {
+    const epsFairValue = trailingEps * targetPer;
+    if (epsFairValue > 0 && isFinite(epsFairValue)) {
+      return {
+        fairValuePerShare: epsFairValue,
+        enterpriseValue:   epsFairValue * Math.max(dcfParams.shares, 1),
+        pvOfFCFs:          0,
+        pvOfTerminalValue: 0,
+        projectedFCFs:     [],
+        pvFCFs:            [],
+        model:             'eps',
+        trailingEpsUsed:   trailingEps,
+        targetPerUsed:     targetPer,
+      };
+    }
+  }
+
+  // 최후 폴백: FCF·EPS 모두 미제공 → 'unavailable' 반환
+  // currentPrice를 fairValuePerShare로 사용해 AI 점수 DCF 항목을 중립으로 처리
+  return {
+    fairValuePerShare: safePrice,   // 중립 (현재가 = 적정가로 간주)
+    enterpriseValue:   safePrice * Math.max(dcfParams.shares, 1),
+    pvOfFCFs:          0,
+    pvOfTerminalValue: 0,
+    projectedFCFs:     [],
+    pvFCFs:            [],
+    model:             'unavailable',
+  };
+}
+
+/* ─────────────────────────────────────────────
  * 2. 밸류에이션 레이블 반환
  * ───────────────────────────────────────────── */
 export function getValuationLabel(

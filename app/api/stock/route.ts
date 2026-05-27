@@ -46,10 +46,11 @@ function fmtVol(n: number): string {
   if (n >= 1e3) return `${(n / 1e3).toFixed(0)}K`;
   return `${n}`;
 }
-function fmtCap(n: number): string {
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
-  if (n >= 1e9)  return `$${(n / 1e9).toFixed(1)}B`;
-  return         `$${(n / 1e6).toFixed(0)}M`;
+function fmtCap(n: number, currency = 'USD'): string {
+  const sym = currency === 'KRW' ? '₩' : '$';
+  if (n >= 1e12) return `${sym}${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9)  return `${sym}${(n / 1e9).toFixed(1)}B`;
+  return         `${sym}${(n / 1e6).toFixed(0)}M`;
 }
 
 /* ─────────────────────────────────────────────
@@ -126,6 +127,7 @@ function mapAV(
   ts: AVTimeSeries,
   ov: AVOverview,
   fb: CompanyFundamentals | undefined,
+  exchangeRate: number,
 ): StockData {
   const rawSeries = ts['Time Series (Daily)'];
   if (!rawSeries) throw new Error('AV: Time Series 없음');
@@ -153,6 +155,7 @@ function mapAV(
   const change  = Math.round((last.close - prev.close) * 100) / 100;
   const changePct = Math.round((change / prev.close) * 10000) / 100;
 
+  const currency  = (ticker.endsWith('.KS') || ticker.endsWith('.KQ')) ? 'KRW' : 'USD';
   const sharesM   = si(ov.SharesOutstanding) > 0 ? Math.round(si(ov.SharesOutstanding) / 1e6) : (fb?.shares ?? 1000);
   const capRaw    = si(ov.MarketCapitalization);
   const gp        = sf(ov.GrossProfitTTM);
@@ -173,7 +176,7 @@ function mapAV(
     change,
     changePercent: changePct,
     volume:    fmtVol(last.volume),
-    marketCap: capRaw > 0 ? fmtCap(capRaw) : (fb?.marketCap ?? 'N/A'),
+    marketCap: capRaw > 0 ? fmtCap(capRaw, currency) : (fb?.marketCap ?? 'N/A'),
     week52High: sf(ov['52WeekHigh'],  fb?.week52High  ?? last.close * 1.2),
     week52Low:  sf(ov['52WeekLow'],   fb?.week52Low   ?? last.close * 0.8),
     fcf:     fb?.fcf    ?? Math.round(sf(ov.EBITDA) / 1e6 * 0.6),
@@ -204,6 +207,8 @@ function mapAV(
     source:    'live',
     provider:  'alphavantage',
     fetchedAt: new Date().toISOString(),
+    currency,
+    exchangeRate,
   };
 }
 
@@ -305,6 +310,8 @@ interface YFQuoteSummaryResponse {
         priceToBook?:       { raw?: number };
         enterpriseToEbitda?: { raw?: number };
         sharesOutstanding?: { raw?: number };
+        /** 주당 순이익 (EPS-PER 폴백 모델용) */
+        trailingEps?:       { raw?: number };
       };
       financialData?: {
         currentRatio?:    { raw?: number };
@@ -324,6 +331,23 @@ interface YFQuoteSummaryResponse {
     }>;
     error?: null | { code: string; description: string };
   };
+}
+
+/** 실시간 USD→KRW 환율 조회. 실패 시 fallback 1350 반환 */
+async function fetchExchangeRate(): Promise<number> {
+  try {
+    const url = 'https://query1.finance.yahoo.com/v8/finance/chart/USDKRW%3DX?interval=1d&range=1d';
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      next: { revalidate: 3600 },
+    });
+    if (!res.ok) return 1350;
+    const data: YFChartResponse = await res.json();
+    const price = data.chart.result?.[0]?.meta?.regularMarketPrice;
+    return price && price > 0 ? Math.round(price * 100) / 100 : 1350;
+  } catch {
+    return 1350;
+  }
 }
 
 async function fhFetch<T>(path: string, key: string, revalidate = 300): Promise<T> {
@@ -380,8 +404,12 @@ function mapFinnhub(
   fb: CompanyFundamentals | undefined,
   avErr: string,
   isAvFallback: boolean,
+  exchangeRate: number,
 ): StockData {
   if (!yfBars.length) throw new Error('YF: 차트 데이터 없음');
+
+  const currency = profile.currency
+    || ((ticker.endsWith('.KS') || ticker.endsWith('.KQ')) ? 'KRW' : 'USD');
 
   const { rows: allRows, allCloses } = buildChartRows(yfBars);
   const lastIdx = allRows.length - 1;
@@ -418,7 +446,7 @@ function mapFinnhub(
     change,
     changePercent: changePct,
     volume:    fmtVol(yfBars[yfBars.length - 1].volume),
-    marketCap: capMillions > 0 ? fmtCap(capMillions * 1e6) : (fb?.marketCap ?? 'N/A'),
+    marketCap: capMillions > 0 ? fmtCap(capMillions * 1e6, currency) : (fb?.marketCap ?? 'N/A'),
     week52High: w52h,
     week52Low:  w52l,
     fcf:     fb?.fcf    ?? 1000,
@@ -452,6 +480,8 @@ function mapFinnhub(
     note:      isAvFallback
       ? `Alpha Vantage 사용량 초과 (${avErr}). Finnhub + Yahoo Finance 데이터로 자동 전환됨.`
       : undefined,
+    currency,
+    exchangeRate,
   };
 }
 
@@ -464,6 +494,7 @@ async function fetchFromFinnhub(
   avErr: string,
   fb: CompanyFundamentals | undefined,
   isAvFallback: boolean,
+  exchangeRate: number,
 ): Promise<StockData> {
   const [quote, yfBars, profile, metrics] = await Promise.all([
     fhFetch<FHQuote>(`/quote?symbol=${encodeURIComponent(ticker)}`, key, 60),
@@ -472,7 +503,7 @@ async function fetchFromFinnhub(
     fhFetch<FHMetric>(`/stock/metric?symbol=${encodeURIComponent(ticker)}&metric=all`, key, 3600),
   ]);
 
-  return mapFinnhub(ticker, quote, yfBars, profile, metrics, fb, avErr, isAvFallback);
+  return mapFinnhub(ticker, quote, yfBars, profile, metrics, fb, avErr, isAvFallback, exchangeRate);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -486,6 +517,7 @@ async function fetchFromYahooFinance(
   ticker: string,
   fb: CompanyFundamentals | undefined,
   prevErrMsg: string,
+  exchangeRate: number,
 ): Promise<StockData> {
   // 차트 + 펀더멘털 + 종목명 병렬 호출
   const [chartRes, summaryRes, quoteNameRes] = await Promise.allSettled([
@@ -572,6 +604,11 @@ async function fetchFromYahooFinance(
   const fd = qs.financialData;
   const sd = qs.summaryDetail;
 
+  // 통화 감지: YF meta → quoteSummary.price → 티커 suffix 순서로 판별
+  const currency = meta.currency
+    || pr?.currency
+    || ((ticker.endsWith('.KS') || ticker.endsWith('.KQ')) ? 'KRW' : 'USD');
+
   // v1 search에서 종목명 추출 (quoteSummary가 한국 주식명을 못 반환할 때 보완)
   let searchName: string | undefined;
   try {
@@ -608,7 +645,10 @@ async function fetchFromYahooFinance(
   const deRaw   = raw(fd?.debtToEquity, 0);
   const deRatio = deRaw > 0 ? deRaw / 100 : (fb?.debtToEquity ?? 0.5);
 
-  const fcfRaw = raw(fd?.freeCashflow, 0);
+  const fcfRaw        = raw(fd?.freeCashflow, 0);
+  // trailingEps: Yahoo Finance defaultKeyStatistics.trailingEps.raw
+  // KRW 주식은 원 단위, USD 주식은 달러 단위 — currentPrice와 같은 단위
+  const trailingEpsRaw = raw(ks?.trailingEps, 0);
 
   return {
     ticker,
@@ -622,7 +662,7 @@ async function fetchFromYahooFinance(
     change,
     changePercent: changePct,
     volume:    fmtVol(lastBar.volume),
-    marketCap: marketCapRaw > 0 ? fmtCap(marketCapRaw) : (fb?.marketCap ?? 'N/A'),
+    marketCap: marketCapRaw > 0 ? fmtCap(marketCapRaw, currency) : (fb?.marketCap ?? 'N/A'),
     week52High: w52h,
     week52Low:  w52l,
     fcf:     fcfRaw > 0 ? Math.round(fcfRaw / 1e6) : (fb?.fcf ?? 1000),
@@ -654,6 +694,10 @@ async function fetchFromYahooFinance(
     provider:  'yahoo',
     fetchedAt: new Date().toISOString(),
     note: prevErrMsg ? `${prevErrMsg}. Yahoo Finance 데이터로 자동 전환됨.` : undefined,
+    currency,
+    exchangeRate,
+    // EPS-PER 폴백 모델용: 유효한 양수 값만 전달
+    trailingEps: trailingEpsRaw > 0 ? trailingEpsRaw : undefined,
   };
 }
 
@@ -753,8 +797,11 @@ export async function GET(request: NextRequest): Promise<Response> {
     );
   }
 
-  // Yahoo Finance Search로 표준 심볼 변환 (삼성전자 → 005930.KS 등)
-  const ticker = await resolveSymbol(rawQuery);
+  // 심볼 변환 + 실시간 환율을 병렬로 가져온다
+  const [ticker, exchangeRate] = await Promise.all([
+    resolveSymbol(rawQuery),
+    fetchExchangeRate(),
+  ]);
 
   const avKey = process.env.STOCK_API_KEY;
   const fhKey = process.env.FINNHUB_API_KEY;
@@ -767,7 +814,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     try {
       const [ts, ov] = await Promise.all([avTimeSeries(ticker, avKey), avOverview(ticker, avKey)]);
       return Response.json(
-        mapAV(ticker, ts, ov, fb),
+        mapAV(ticker, ts, ov, fb, exchangeRate),
         { headers: { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=600' } },
       );
     } catch (avErr) {
@@ -778,7 +825,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   /* ── 2순위: Finnhub ─────────────────────── */
   if (fhKey && fhKey !== 'your_finnhub_key_here') {
     try {
-      const data = await fetchFromFinnhub(ticker, fhKey, errors[0] ?? '', fb, errors.length > 0);
+      const data = await fetchFromFinnhub(ticker, fhKey, errors[0] ?? '', fb, errors.length > 0, exchangeRate);
       return Response.json(data, {
         headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=120' },
       });
@@ -789,7 +836,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   /* ── 3순위: Yahoo Finance (키 불필요) ───── */
   try {
-    const data = await fetchFromYahooFinance(ticker, fb, errors.join(', '));
+    const data = await fetchFromYahooFinance(ticker, fb, errors.join(', '), exchangeRate);
     return Response.json(data, {
       headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=120' },
     });

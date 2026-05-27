@@ -153,6 +153,25 @@ const dashboard = {
     macdTitle:  'MACD',
     macdSub:    '(12, 26, 9)',
 
+    /* Currency toggle */
+    currencyToggleToKRW: '₩ 원화로 보기',
+    currencyToggleToUSD: '$ 달러로 보기',
+
+    /* Valuation model badge */
+    dcfModelBadge:         'DCF 현금흐름 모델 적용',
+    epsModelBadge:         'EPS-PER 가치 모델 (데이터 제한 대체)',
+    unavailableModelBadge: '가치평가 데이터 미제공',
+
+    /* EPS-PER breakdown grid (EPS 모델 적용 시) */
+    epsEpsLabel:  'EPS (주당순이익)',
+    epsPERLabel:  '적용 PER',
+    epsFairLabel: '적정 주가',
+
+    /* Unavailable state */
+    valuationUnavailableTitle: '적정 주가 산출 불가',
+    valuationUnavailableDesc:  '이 종목은 야후 파이낸스를 통해 FCF·EPS 등 가치평가에 필요한 재무 데이터를 제공하지 않아 DCF 및 EPS-PER 모델을 적용할 수 없습니다.',
+    valuationUnavailableHint:  'Alpha Vantage 또는 Finnhub API 키를 설정하면 정확한 데이터를 이용할 수 있습니다.',
+
     /* Footer */
     footerData: '실시간 시장 데이터 (Alpha Vantage / Finnhub)',
     footerNote: '실제 투자 결정에 활용하지 마세요.',
@@ -297,6 +316,25 @@ const dashboard = {
     zone:       'Zone',
     macdTitle:  'MACD',
     macdSub:    '(12, 26, 9)',
+
+    /* Currency toggle */
+    currencyToggleToKRW: '₩ View in KRW',
+    currencyToggleToUSD: '$ View in USD',
+
+    /* Valuation model badge */
+    dcfModelBadge:         'DCF Cash Flow Model',
+    epsModelBadge:         'EPS-PER Model (Limited Data Fallback)',
+    unavailableModelBadge: 'Valuation Data Unavailable',
+
+    /* EPS-PER breakdown grid */
+    epsEpsLabel:  'EPS',
+    epsPERLabel:  'Applied PER',
+    epsFairLabel: 'Fair Value',
+
+    /* Unavailable state */
+    valuationUnavailableTitle: 'Fair Value Unavailable',
+    valuationUnavailableDesc:  'Yahoo Finance does not provide FCF or EPS data for this security, so neither DCF nor EPS-PER valuation can be applied.',
+    valuationUnavailableHint:  'Set an Alpha Vantage or Finnhub API key for more complete fundamental data.',
 
     /* Footer */
     footerData: 'Real-time market data (Alpha Vantage / Finnhub)',
