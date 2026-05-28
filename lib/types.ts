@@ -29,6 +29,25 @@ export type StockData = CompanyFundamentals &
     currency: string;
     /** 실시간 USD→KRW 환율 (fallback 1350) */
     exchangeRate: number;
+
+    /* ── Guru Strategy fields (Yahoo Finance quoteSummary) ─────────────────
+     * 야후 파이낸스 quoteSummary에서 추출한 대가 전략 분석용 추가 지표.
+     * Alpha Vantage / Finnhub 경로에서는 undefined.
+     * ──────────────────────────────────────────────────────────────────── */
+    /** PEG 비율 (Yahoo Finance 사전 계산값, defaultKeyStatistics.pegRatio) */
+    pegRatio?: number;
+    /** EPS 성장률 소수 (0.20 = 20%, financialData.earningsGrowth) */
+    earningsGrowth?: number;
+    /** 순이익 — 보통주 귀속분, 백만 단위 (financialData.netIncomeToCommon) */
+    netIncome?: number;
+    /** 영업현금흐름, 백만 단위 (financialData.operatingCashflow) */
+    operatingCashflow?: number;
+    /** 총자산이익률 소수 (0.05 = 5%, financialData.returnOnAssets) */
+    returnOnAssets?: number;
+    /** EBITDA, 백만 단위 (financialData.ebitda) */
+    ebitda?: number;
+    /** 총부채, 백만 단위 (financialData.totalDebt) */
+    totalDebt?: number;
   };
 
 /** /api/stock의 HTTP 4xx·5xx 에러 응답 타입 */

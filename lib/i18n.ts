@@ -179,6 +179,80 @@ const dashboard = {
     footerData: '실시간 시장 데이터 (Alpha Vantage / Finnhub)',
     footerNote: '실제 투자 결정에 활용하지 마세요.',
     footerQA:   'QA 테스트 하네스',
+
+    /* ── Guru Strategies Tab ─────────────────────────────── */
+    tabGuru:    '🧙  대가의 투자 시그널',
+    guruSection: '대가의 투자법 (Guru Strategies)',
+
+    /* PEG Analysis — Peter Lynch */
+    pegTitle:       '피터 린치 PEG 분석',
+    pegSub:         '성장률 대비 주가수익비율 (PEG)',
+    pegFormula:     'PEG = PER ÷ 이익성장률(%)',
+    pegRatioLabel:  'PEG Ratio',
+    pegPerLabel:    'PER',
+    pegGrowthLabel: 'EPS 성장률',
+    pegNoData:      '이익성장률 데이터 없음',
+    pegNoDataDesc:  '야후 파이낸스에서 이익성장률 데이터를 제공하지 않아 PEG 비율을 산출할 수 없습니다. Alpha Vantage 또는 Finnhub API 키를 설정하면 더 많은 데이터를 이용할 수 있습니다.',
+    pegTiers: {
+      strong_buy:  '강력 저평가 (PEG ≤ 0.5)',
+      buy:         '저평가 — 매력적 (PEG ≤ 1.0)',
+      fair:        '적정 수준 (PEG ≤ 1.5)',
+      overvalued:  '고평가 (PEG > 1.5)',
+      unavailable: '데이터 없음',
+    } as Record<string, string>,
+    pegGuideTitle: 'PEG 해석 기준',
+    pegZones: [
+      { range: '≤ 0.5', label: '강력 저평가', c: 'text-emerald-400' },
+      { range: '≤ 1.0', label: '저평가',      c: 'text-green-400' },
+      { range: '≤ 1.5', label: '적정',        c: 'text-amber-400' },
+      { range: '> 1.5', label: '고평가',      c: 'text-rose-400' },
+    ] as { range: string; label: string; c: string }[],
+
+    /* Piotroski F-Score */
+    piotroskiTitle:    '피오트로스키 F-스코어',
+    piotroskiSub:      '재무 건전성 9개 기준 체크리스트',
+    piotroskiTiers: {
+      strong:   '우량 기업 신호 (7–9점)',
+      moderate: '보통 수준 (4–6점)',
+      weak:     '위험 신호 (0–3점)',
+    } as Record<string, string>,
+    piotroskiCatLabels: {
+      profitability: '수익성',
+      leverage:      '재무건전성',
+      efficiency:    '운영효율',
+    } as Record<string, string>,
+    piotroskiCriteria: {
+      roa_positive:       'ROA(총자산이익률) > 0',
+      ocf_positive:       '영업현금흐름 > 0',
+      accrual:            '영업현금흐름 > 순이익 (이익 품질)',
+      gross_margin:       '매출총이익률 ≥ 20%',
+      low_leverage:       '부채비율(D/E) ≤ 1.0',
+      liquidity:          '유동비율 ≥ 1.5',
+      operating_positive: '영업이익률 > 0%',
+      roe_strong:         'ROE(자기자본이익률) ≥ 10%',
+      net_margin:         '순이익률 ≥ 5%',
+    } as Record<string, string>,
+    piotroskiProxyNote: '* 데이터 부족 시 대체 기준으로 계산',
+
+    /* Magic Formula — Greenblatt */
+    magicTitle:    '그린블라트 마법 공식',
+    magicSub:      '이익수익률 + 자본수익률 통합 평가',
+    magicEYLabel:  '이익수익률 (EY)',
+    magicEYDesc:   '1 ÷ EV/EBITDA (EBITDA 기반 EV 수익률)',
+    magicROCLabel: '자본수익률 (ROC)',
+    magicROCDesc:  'ROE × 70% + 영업이익률 × 30%',
+    magicAttrTitle: '종합 투자 매력도',
+    magicAttrLabels: {
+      high:   '매력 높음 ★★★',
+      medium: '매력 보통 ★★',
+      low:    '매력 낮음 ★',
+    } as Record<string, string>,
+    magicTierLabels: {
+      high:   '높음',
+      medium: '보통',
+      low:    '낮음',
+    } as Record<string, string>,
+    magicNote: '※ EV/EBITDA 미제공 시 PER 기반으로 대체 계산됩니다.',
   },
 
   en: {
@@ -346,6 +420,80 @@ const dashboard = {
     footerData: 'Real-time market data (Alpha Vantage / Finnhub)',
     footerNote: 'Not for actual investment decisions.',
     footerQA:   'QA Test Harness',
+
+    /* ── Guru Strategies Tab ─────────────────────────────── */
+    tabGuru:    '🧙  Guru Strategies',
+    guruSection: 'Guru Strategies',
+
+    /* PEG Analysis — Peter Lynch */
+    pegTitle:       'Peter Lynch PEG Analysis',
+    pegSub:         'Price-to-Earnings relative to Growth (PEG)',
+    pegFormula:     'PEG = P/E ÷ EPS Growth Rate (%)',
+    pegRatioLabel:  'PEG Ratio',
+    pegPerLabel:    'P/E',
+    pegGrowthLabel: 'EPS Growth',
+    pegNoData:      'Earnings Growth Data Unavailable',
+    pegNoDataDesc:  'Yahoo Finance does not provide earnings growth data for this security, so the PEG ratio cannot be calculated. Set an Alpha Vantage or Finnhub API key for more complete data.',
+    pegTiers: {
+      strong_buy:  'Strongly Undervalued (PEG ≤ 0.5)',
+      buy:         'Undervalued — Attractive (PEG ≤ 1.0)',
+      fair:        'Fair Value (PEG ≤ 1.5)',
+      overvalued:  'Overvalued (PEG > 1.5)',
+      unavailable: 'Data Unavailable',
+    } as Record<string, string>,
+    pegGuideTitle: 'PEG Interpretation Guide',
+    pegZones: [
+      { range: '≤ 0.5', label: 'Strong Buy', c: 'text-emerald-400' },
+      { range: '≤ 1.0', label: 'Undervalued', c: 'text-green-400' },
+      { range: '≤ 1.5', label: 'Fair Value',  c: 'text-amber-400' },
+      { range: '> 1.5', label: 'Overvalued',  c: 'text-rose-400' },
+    ] as { range: string; label: string; c: string }[],
+
+    /* Piotroski F-Score */
+    piotroskiTitle:    'Piotroski F-Score',
+    piotroskiSub:      'Financial Health 9-Point Checklist',
+    piotroskiTiers: {
+      strong:   'Strong Signal (7–9 pts)',
+      moderate: 'Moderate (4–6 pts)',
+      weak:     'Weak Signal (0–3 pts)',
+    } as Record<string, string>,
+    piotroskiCatLabels: {
+      profitability: 'Profitability',
+      leverage:      'Leverage & Liquidity',
+      efficiency:    'Operating Efficiency',
+    } as Record<string, string>,
+    piotroskiCriteria: {
+      roa_positive:       'ROA (Return on Assets) > 0',
+      ocf_positive:       'Operating Cash Flow > 0',
+      accrual:            'OCF > Net Income (Earnings Quality)',
+      gross_margin:       'Gross Margin ≥ 20%',
+      low_leverage:       'Debt-to-Equity ≤ 1.0',
+      liquidity:          'Current Ratio ≥ 1.5',
+      operating_positive: 'Operating Margin > 0%',
+      roe_strong:         'ROE (Return on Equity) ≥ 10%',
+      net_margin:         'Net Profit Margin ≥ 5%',
+    } as Record<string, string>,
+    piotroskiProxyNote: '* Calculated using proxy when data is limited',
+
+    /* Magic Formula — Greenblatt */
+    magicTitle:    'Greenblatt Magic Formula',
+    magicSub:      'Earnings Yield + Return on Capital',
+    magicEYLabel:  'Earnings Yield (EY)',
+    magicEYDesc:   '1 ÷ EV/EBITDA (EBITDA-based EV yield)',
+    magicROCLabel: 'Return on Capital (ROC)',
+    magicROCDesc:  'ROE × 70% + Operating Margin × 30%',
+    magicAttrTitle: 'Overall Investment Attractiveness',
+    magicAttrLabels: {
+      high:   'High Attractiveness ★★★',
+      medium: 'Moderate Attractiveness ★★',
+      low:    'Low Attractiveness ★',
+    } as Record<string, string>,
+    magicTierLabels: {
+      high:   'High',
+      medium: 'Mid',
+      low:    'Low',
+    } as Record<string, string>,
+    magicNote: '※ Falls back to P/E-based EY when EV/EBITDA is unavailable.',
   },
 } as const;
 

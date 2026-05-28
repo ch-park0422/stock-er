@@ -312,6 +312,8 @@ interface YFQuoteSummaryResponse {
         sharesOutstanding?: { raw?: number };
         /** 주당 순이익 (EPS-PER 폴백 모델용) */
         trailingEps?:       { raw?: number };
+        /** PEG 비율 (Yahoo 사전 계산) */
+        pegRatio?:          { raw?: number };
       };
       financialData?: {
         currentRatio?:    { raw?: number };
@@ -321,6 +323,18 @@ interface YFQuoteSummaryResponse {
         profitMargins?:   { raw?: number };
         returnOnEquity?:  { raw?: number };  // 소수
         freeCashflow?:    { raw?: number };  // 절대값 (원 단위)
+        /** EPS 성장률 소수 (Guru: PEG 대체 계산용) */
+        earningsGrowth?:    { raw?: number };
+        /** 총자산이익률 소수 (Guru: Piotroski F1) */
+        returnOnAssets?:    { raw?: number };
+        /** 영업현금흐름 절대값 (Guru: Piotroski F2·F3) */
+        operatingCashflow?: { raw?: number };
+        /** 총부채 절대값 (Guru: 레버리지) */
+        totalDebt?:         { raw?: number };
+        /** EBITDA 절대값 (Guru: Magic Formula EY 보조) */
+        ebitda?:            { raw?: number };
+        /** 보통주 귀속 순이익 절대값 (Guru: Piotroski F3) */
+        netIncomeToCommon?: { raw?: number };
       };
       summaryDetail?: {
         marketCap?:        { raw?: number };
@@ -650,6 +664,15 @@ async function fetchFromYahooFinance(
   // KRW 주식은 원 단위, USD 주식은 달러 단위 — currentPrice와 같은 단위
   const trailingEpsRaw = raw(ks?.trailingEps, 0);
 
+  /* ── Guru Strategy 추가 필드 ─────────────────────────────── */
+  const pegRatioRaw       = raw(ks?.pegRatio,          0);
+  const earningsGrowthRaw = raw(fd?.earningsGrowth,    0);  // 소수
+  const roaRaw            = raw(fd?.returnOnAssets,    0);  // 소수
+  const ocfRaw            = raw(fd?.operatingCashflow, 0);  // 절대값 (원 단위)
+  const totalDebtRaw      = raw(fd?.totalDebt,         0);  // 절대값
+  const ebitdaFDRaw       = raw(fd?.ebitda,            0);  // 절대값
+  const niRaw             = raw(fd?.netIncomeToCommon, 0);  // 절대값 (음수 가능)
+
   return {
     ticker,
     name,
@@ -698,6 +721,14 @@ async function fetchFromYahooFinance(
     exchangeRate,
     // EPS-PER 폴백 모델용: 유효한 양수 값만 전달
     trailingEps: trailingEpsRaw > 0 ? trailingEpsRaw : undefined,
+    // ── Guru Strategy fields ─────────────────────────────────
+    pegRatio:          pegRatioRaw > 0 && isFinite(pegRatioRaw)   ? Math.round(pegRatioRaw * 100) / 100 : undefined,
+    earningsGrowth:    earningsGrowthRaw > -1 && earningsGrowthRaw !== 0 ? earningsGrowthRaw : undefined,
+    returnOnAssets:    roaRaw !== 0                                ? roaRaw   : undefined,
+    operatingCashflow: ocfRaw > 0                                  ? Math.round(ocfRaw / 1e6) : undefined,
+    totalDebt:         totalDebtRaw > 0                            ? Math.round(totalDebtRaw / 1e6) : undefined,
+    ebitda:            ebitdaFDRaw > 0                             ? Math.round(ebitdaFDRaw / 1e6) : undefined,
+    netIncome:         niRaw !== 0                                 ? Math.round(niRaw / 1e6) : undefined,
   };
 }
 

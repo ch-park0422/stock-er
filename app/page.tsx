@@ -24,6 +24,7 @@ import {
 import {
   calculateDCF, getValuationLabel, calculateAIScore,
   detectMACross, calculateHybridValuation,
+  calculatePegScore, calculatePiotroski, calculateMagicFormula,
 } from '@/lib/analysis';
 import type { CompanyFundamentals, MockDataResult, ChartRow } from '@/lib/mockData';
 import type { StockData } from '@/lib/types';
@@ -244,7 +245,339 @@ function ParamSlider({
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * 3. DCF 게이지 (하이브리드 가치평가: DCF → EPS-PER → unavailable)
+ * 3. Guru Strategy 컴포넌트
+ *    PegAnalysis / PiotroskiScore / MagicFormula
+ * ═══════════════════════════════════════════════════════════════ */
+
+/* ── 3-A. PEG 분석 (피터 린치) ─────────────────────────────── */
+function PegAnalysis({ stockData, t }: { stockData: StockData; t: DashboardT }) {
+  const result = useMemo(() =>
+    calculatePegScore(stockData.per, stockData.earningsGrowth, stockData.pegRatio),
+    [stockData.per, stockData.earningsGrowth, stockData.pegRatio],
+  );
+
+  const tierLabel = t.pegTiers[result.tier] ?? result.tier;
+  const growthPct = stockData.earningsGrowth != null
+    ? `${(stockData.earningsGrowth * 100).toFixed(1)}%`
+    : (stockData.pegRatio != null && stockData.per > 0
+        ? `${((stockData.per / (stockData.pegRatio)) ).toFixed(1)}%`
+        : '—');
+
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-5 flex flex-col gap-4">
+      {/* 헤더 */}
+      <div>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2">
+              <span className="text-lg">🦁</span>
+              {t.pegTitle}
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">{t.pegSub}</p>
+          </div>
+          {result.hasData && (
+            <span className={cn(
+              'flex-shrink-0 text-[10px] font-bold px-2 py-1 rounded-full border',
+              result.bgColor,
+              result.tier === 'strong_buy' ? 'border-emerald-500/30 text-emerald-400' :
+              result.tier === 'buy'        ? 'border-green-500/30 text-green-400' :
+              result.tier === 'fair'       ? 'border-amber-500/30 text-amber-400' :
+                                            'border-rose-500/30 text-rose-400',
+            )}>
+              {tierLabel}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 데이터 없음 */}
+      {!result.hasData ? (
+        <div className="flex flex-col items-center text-center gap-3 py-4">
+          <div className="w-12 h-12 rounded-2xl bg-gray-800/60 border border-gray-700/50 flex items-center justify-center text-xl">📊</div>
+          <div>
+            <p className="text-gray-400 font-semibold text-sm mb-1">{t.pegNoData}</p>
+            <p className="text-gray-600 text-xs leading-relaxed max-w-xs mx-auto">{t.pegNoDataDesc}</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* PEG 수치 */}
+          <div className="flex items-end gap-4">
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest">{t.pegRatioLabel}</p>
+              <p className={cn('text-4xl font-black mt-0.5', result.color)}>{result.peg.toFixed(2)}</p>
+            </div>
+            <div className="pb-1 space-y-0.5">
+              <p className="text-[10px] text-gray-600">
+                {t.pegPerLabel} <span className="text-gray-400 font-semibold">{stockData.per.toFixed(1)}×</span>
+              </p>
+              <p className="text-[10px] text-gray-600">
+                {t.pegGrowthLabel} <span className="text-gray-400 font-semibold">{growthPct}</span>
+              </p>
+              <p className="text-[10px] text-gray-700 italic">{t.pegFormula}</p>
+            </div>
+          </div>
+
+          {/* 게이지 바 */}
+          <div className="space-y-2">
+            <div className="relative h-4 rounded-full overflow-visible"
+              style={{ background: 'linear-gradient(to right, #10b981, #22c55e, #f59e0b, #ef4444)' }}>
+              {/* 현재 PEG 마커 */}
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-5 bg-white rounded shadow-lg"
+                style={{ left: `calc(${result.barPct}% - 6px)` }}
+              />
+              {/* 구간 기준선 */}
+              {[25, 50, 75].map(pct => (
+                <div key={pct} className="absolute top-0 bottom-0 w-px bg-black/20" style={{ left: `${pct}%` }} />
+              ))}
+            </div>
+            {/* 눈금 레이블 */}
+            <div className="flex justify-between text-[9px] text-gray-600">
+              <span>0</span><span>0.5</span><span>1.0</span><span>1.5</span><span>2.0+</span>
+            </div>
+          </div>
+
+          {/* 구간 해석 테이블 */}
+          <div className="border-t border-gray-800 pt-3">
+            <p className="text-[10px] text-gray-600 font-semibold uppercase tracking-wider mb-2">{t.pegGuideTitle}</p>
+            <div className="space-y-1">
+              {t.pegZones.map(z => (
+                <div key={z.range}
+                  className={cn(
+                    'flex items-center justify-between px-2 py-1 rounded-lg text-[11px]',
+                    result.hasData && (
+                      (result.tier === 'strong_buy' && z.range === '≤ 0.5') ||
+                      (result.tier === 'buy'        && z.range === '≤ 1.0') ||
+                      (result.tier === 'fair'       && z.range === '≤ 1.5') ||
+                      (result.tier === 'overvalued' && z.range === '> 1.5')
+                    ) ? 'bg-gray-800/70 ring-1 ring-gray-700' : '',
+                  )}>
+                  <span className="text-gray-500 font-mono">PEG {z.range}</span>
+                  <span className={cn('font-semibold', z.c)}>{z.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── 3-B. 피오트로스키 F-스코어 ─────────────────────────────── */
+function PiotroskiScore({ stockData, t }: { stockData: StockData; t: DashboardT }) {
+  const result = useMemo(() => calculatePiotroski({
+    returnOnAssets:   stockData.returnOnAssets,
+    operatingCashflow: stockData.operatingCashflow,
+    netIncome:        stockData.netIncome,
+    fcf:              stockData.fcf,
+    grossMargin:      stockData.grossMargin,
+    debtToEquity:     stockData.debtToEquity,
+    currentRatio:     stockData.currentRatio,
+    operatingMargin:  stockData.operatingMargin,
+    roe:              stockData.roe,
+    netMargin:        stockData.netMargin,
+  }), [stockData]);
+
+  const tierLabel = t.piotroskiTiers[result.tier] ?? result.tier;
+
+  // 카테고리별 그룹화
+  const categories: Array<{ key: 'profitability' | 'leverage' | 'efficiency' }> = [
+    { key: 'profitability' },
+    { key: 'leverage' },
+    { key: 'efficiency' },
+  ];
+
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-5 flex flex-col gap-4">
+      {/* 헤더 */}
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2">
+            <span className="text-lg">📋</span>
+            {t.piotroskiTitle}
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">{t.piotroskiSub}</p>
+        </div>
+        {/* 점수 뱃지 */}
+        <div className={cn(
+          'flex-shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border font-black',
+          result.bgColor,
+          result.tier === 'strong' ? 'border-emerald-500/30' :
+          result.tier === 'moderate' ? 'border-amber-500/30' : 'border-rose-500/30',
+        )}>
+          <span className={cn('text-2xl leading-none', result.color)}>{result.score}</span>
+          <span className="text-[9px] text-gray-600 font-normal">/ 9</span>
+        </div>
+      </div>
+
+      {/* 점수 요약 */}
+      <div className={cn('px-3 py-2 rounded-xl border text-xs font-semibold', result.bgColor,
+        result.tier === 'strong' ? 'border-emerald-500/30 text-emerald-400' :
+        result.tier === 'moderate' ? 'border-amber-500/30 text-amber-400' : 'border-rose-500/30 text-rose-400',
+      )}>
+        {tierLabel}
+      </div>
+
+      {/* 기준별 체크리스트 */}
+      <div className="space-y-3">
+        {categories.map(({ key }) => {
+          const items = result.criteria.filter(c => c.category === key);
+          return (
+            <div key={key}>
+              <p className="text-[10px] text-gray-600 uppercase tracking-wider font-bold mb-1.5">
+                {t.piotroskiCatLabels[key] ?? key}
+              </p>
+              <div className="space-y-1">
+                {items.map(criterion => (
+                  <div key={criterion.id}
+                    className={cn(
+                      'flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs',
+                      criterion.passed
+                        ? 'bg-emerald-500/5 border border-emerald-500/15'
+                        : 'bg-rose-500/5 border border-rose-500/10',
+                    )}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={criterion.passed ? 'text-emerald-400' : 'text-rose-400'}>
+                        {criterion.passed ? '✓' : '✗'}
+                      </span>
+                      <span className={cn(
+                        'text-[11px] truncate',
+                        criterion.passed ? 'text-gray-300' : 'text-gray-500',
+                      )}>
+                        {t.piotroskiCriteria[criterion.id] ?? criterion.id}
+                        {!criterion.hasData && (
+                          <span className="text-gray-700 ml-1">*</span>
+                        )}
+                      </span>
+                    </div>
+                    <span className={cn(
+                      'text-[10px] font-mono flex-shrink-0 ml-2',
+                      criterion.passed ? 'text-emerald-600' : 'text-rose-700',
+                    )}>
+                      {criterion.valueStr}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 대체 기준 주석 */}
+      {result.criteria.some(c => !c.hasData) && (
+        <p className="text-[10px] text-gray-700 border-t border-gray-800 pt-2">
+          {t.piotroskiProxyNote}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ── 3-C. 마법 공식 (그린블라트) ────────────────────────────── */
+function MagicFormula({ stockData, t }: { stockData: StockData; t: DashboardT }) {
+  const result = useMemo(() =>
+    calculateMagicFormula(
+      stockData.evEbitda,
+      stockData.per,
+      stockData.roe,
+      stockData.operatingMargin,
+    ),
+    [stockData.evEbitda, stockData.per, stockData.roe, stockData.operatingMargin],
+  );
+
+  const attrLabel    = t.magicAttrLabels[result.attractiveness] ?? result.attractiveness;
+  const eyTierLabel  = t.magicTierLabels[result.eyTier]  ?? result.eyTier;
+  const rocTierLabel = t.magicTierLabels[result.rocTier] ?? result.rocTier;
+
+  // 컴포지트 점수 바: 2→0%, 6→100%
+  const scoreBarPct = ((result.compositeScore - 2) / 4) * 100;
+
+  const tierColor = (tier: 'high' | 'medium' | 'low') =>
+    tier === 'high' ? 'text-emerald-400' : tier === 'medium' ? 'text-amber-400' : 'text-rose-400';
+  const tierBg = (tier: 'high' | 'medium' | 'low') =>
+    tier === 'high' ? 'bg-emerald-500/10 border-emerald-500/25' :
+    tier === 'medium' ? 'bg-amber-500/10 border-amber-500/25' : 'bg-rose-500/10 border-rose-500/25';
+
+  return (
+    <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-5 flex flex-col gap-4">
+      {/* 헤더 */}
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2">
+            <span className="text-lg">✨</span>
+            {t.magicTitle}
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">{t.magicSub}</p>
+        </div>
+      </div>
+
+      {/* 두 지표 카드 */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* 이익수익률 */}
+        <div className={cn('rounded-xl p-3 border', tierBg(result.eyTier))}>
+          <p className="text-[10px] text-gray-500 mb-1 leading-tight">{t.magicEYLabel}</p>
+          <p className={cn('text-2xl font-black', tierColor(result.eyTier))}>
+            {result.earningsYield.toFixed(1)}<span className="text-sm">%</span>
+          </p>
+          <p className={cn('text-[10px] font-semibold mt-1', tierColor(result.eyTier))}>
+            {eyTierLabel} {result.eyTier === 'high' ? '▲' : result.eyTier === 'medium' ? '→' : '▼'}
+          </p>
+          <p className="text-[9px] text-gray-700 mt-1 leading-tight">{t.magicEYDesc}</p>
+        </div>
+        {/* 자본수익률 */}
+        <div className={cn('rounded-xl p-3 border', tierBg(result.rocTier))}>
+          <p className="text-[10px] text-gray-500 mb-1 leading-tight">{t.magicROCLabel}</p>
+          <p className={cn('text-2xl font-black', tierColor(result.rocTier))}>
+            {result.roc.toFixed(1)}<span className="text-sm">%</span>
+          </p>
+          <p className={cn('text-[10px] font-semibold mt-1', tierColor(result.rocTier))}>
+            {rocTierLabel} {result.rocTier === 'high' ? '▲' : result.rocTier === 'medium' ? '→' : '▼'}
+          </p>
+          <p className="text-[9px] text-gray-700 mt-1 leading-tight">{t.magicROCDesc}</p>
+        </div>
+      </div>
+
+      {/* 종합 투자 매력도 */}
+      <div>
+        <p className="text-[10px] text-gray-600 font-bold uppercase tracking-wider mb-2">{t.magicAttrTitle}</p>
+        {/* 3구간 바 */}
+        <div className="h-6 rounded-full overflow-hidden relative"
+          style={{ background: 'linear-gradient(to right, #ef4444, #f59e0b, #10b981)' }}>
+          <div
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-5 bg-white rounded shadow-lg"
+            style={{ left: `calc(${scoreBarPct}% - 6px)` }}
+          />
+          {/* ★ / ★★ / ★★★ 텍스트 */}
+          <div className="absolute inset-0 flex items-center justify-around text-[9px] text-white/50 select-none px-3">
+            <span>★</span><span>★★</span><span>★★★</span>
+          </div>
+        </div>
+
+        {/* 종합 배지 */}
+        <div className={cn(
+          'mt-3 px-3 py-2 rounded-xl border text-xs font-semibold text-center',
+          result.bgColor,
+          result.attractiveness === 'high' ? 'border-emerald-500/30 text-emerald-400' :
+          result.attractiveness === 'medium' ? 'border-amber-500/30 text-amber-400' :
+                                               'border-rose-500/30 text-rose-400',
+        )}>
+          {attrLabel}
+        </div>
+      </div>
+
+      {/* 방법론 주석 */}
+      <p className="text-[10px] text-gray-700 border-t border-gray-800 pt-2 leading-relaxed">
+        {t.magicNote}
+      </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * 4. DCF 게이지 (하이브리드 가치평가: DCF → EPS-PER → unavailable)
  * ═══════════════════════════════════════════════════════════════ */
 function DCFGauge({ company, params, onParamChange, t, fmtPx, convFactor }: {
   company: CompanyFundamentals;
@@ -1042,7 +1375,7 @@ export default function StockDashboard() {
 
   /* ── UI 상태 ────────────────────────────────── */
   const [searchInput, setSearchInput]       = useState('AAPL');
-  const [activeTab, setActiveTab]           = useState<'fundamental' | 'technical'>('fundamental');
+  const [activeTab, setActiveTab]           = useState<'fundamental' | 'technical' | 'guru'>('fundamental');
   const [bannerVisible, setBannerVisible]   = useState(true);
   const [displayCurrency, setDisplayCurrency] = useState<'KRW' | 'USD'>('USD');
 
@@ -1296,11 +1629,12 @@ export default function StockDashboard() {
         />
 
         {/* 탭 */}
-        <div className="flex gap-1 p-1 rounded-2xl w-fit"
+        <div className="flex gap-1 p-1 rounded-2xl w-fit flex-wrap"
           style={{ backgroundColor: '#0d1929', border: '1px solid #1a2535' }}>
           {([
             { key: 'fundamental' as const, label: t.tabFundamental },
             { key: 'technical'   as const, label: t.tabTechnical },
+            { key: 'guru'        as const, label: t.tabGuru },
           ]).map(({ key, label }) => (
             <button key={key} onClick={() => setActiveTab(key)}
               className="px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all"
@@ -1373,6 +1707,23 @@ export default function StockDashboard() {
             </div>
           </div>
         )}
+        {/* ── 대가의 투자 시그널 탭 ──────────────── */}
+        {activeTab === 'guru' && (
+          <div className="space-y-4 sm:space-y-5">
+            <SectionDivider label={t.guruSection} />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
+              <PegAnalysis    stockData={stockData} t={t} />
+              <PiotroskiScore stockData={stockData} t={t} />
+              <MagicFormula   stockData={stockData} t={t} />
+            </div>
+            {/* 면책 미니 배너 */}
+            <div className="bg-gray-900/50 border border-gray-800 rounded-2xl px-4 py-3 text-xs text-gray-600 leading-relaxed">
+              🔬 대가의 투자법 분석은 공개 학술 알고리즘을 기반으로 한 참고용 계산 결과이며, 실제 투자 결정에 사용하지 마세요.
+              PEG 분석은 피터 린치, F-스코어는 조셉 피오트로스키(2000), 마법 공식은 조엘 그린블라트(2005)가 제시한 방법론을 근사 구현합니다.
+            </div>
+          </div>
+        )}
+
       </main>
 
       {/* ── FOOTER ──────────────────────────────── */}

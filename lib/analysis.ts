@@ -487,3 +487,312 @@ export function calculateAIScore(input: AIScoreInput): AIScoreResult {
 
   return { score, grade, gradeColor, feedback, breakdown };
 }
+
+/* ─────────────────────────────────────────────
+ * 8. PEG 비율 분석 (피터 린치)
+ *    PEG = PER ÷ 이익성장률(%)
+ * ───────────────────────────────────────────── */
+export type PegTier = 'strong_buy' | 'buy' | 'fair' | 'overvalued' | 'unavailable';
+
+export interface PegResult {
+  /** PEG 비율 */
+  peg: number;
+  /** 계산에 필요한 데이터 존재 여부 */
+  hasData: boolean;
+  /** 구간 */
+  tier: PegTier;
+  /** Tailwind text color class */
+  color: string;
+  /** Tailwind bg color class */
+  bgColor: string;
+  /** 게이지 바 너비 % (PEG 0 → 0%, PEG 2+ → 100%) */
+  barPct: number;
+}
+
+/**
+ * PEG(주가수익성장비율) 분석
+ *
+ * @param per             P/E 비율 (예: 20)
+ * @param earningsGrowth  이익성장률 소수 (예: 0.20 = 20%). 미제공 시 undefined.
+ * @param yfPegRatio      Yahoo Finance 사전 계산 PEG (우선 사용)
+ */
+export function calculatePegScore(
+  per: number,
+  earningsGrowth?: number,
+  yfPegRatio?: number,
+): PegResult {
+  let peg = 0;
+  let hasData = false;
+
+  if (yfPegRatio != null && isFinite(yfPegRatio) && yfPegRatio > 0) {
+    peg = yfPegRatio;
+    hasData = true;
+  } else if (earningsGrowth != null && earningsGrowth > 0 && per > 0) {
+    peg = per / (earningsGrowth * 100);
+    hasData = true;
+  }
+
+  if (!hasData) {
+    return { peg: 0, hasData: false, tier: 'unavailable',
+      color: 'text-gray-500', bgColor: 'bg-gray-500/10', barPct: 0 };
+  }
+
+  const tier: PegTier =
+    peg <= 0.5 ? 'strong_buy' :
+    peg <= 1.0 ? 'buy' :
+    peg <= 1.5 ? 'fair' : 'overvalued';
+
+  const color =
+    tier === 'strong_buy' ? 'text-emerald-400' :
+    tier === 'buy'        ? 'text-green-400' :
+    tier === 'fair'       ? 'text-amber-400' : 'text-rose-400';
+
+  const bgColor =
+    tier === 'strong_buy' ? 'bg-emerald-500/10' :
+    tier === 'buy'        ? 'bg-green-500/10' :
+    tier === 'fair'       ? 'bg-amber-500/10' : 'bg-rose-500/10';
+
+  return {
+    peg: Math.round(peg * 100) / 100,
+    hasData,
+    tier,
+    color,
+    bgColor,
+    barPct: Math.min((peg / 2.0) * 100, 100),
+  };
+}
+
+/* ─────────────────────────────────────────────
+ * 9. 피오트로스키 F-스코어 (0–9점)
+ *    재무건전성 9개 기준 체크리스트
+ * ───────────────────────────────────────────── */
+export type PiotroskiCategory = 'profitability' | 'leverage' | 'efficiency';
+
+export interface PiotroskiCriterion {
+  /** i18n 번역 키 */
+  id: string;
+  /** 기준 카테고리 */
+  category: PiotroskiCategory;
+  /** 통과 여부 */
+  passed: boolean;
+  /** 실제 수치 문자열 (언어 중립) */
+  valueStr: string;
+  /** 충분한 데이터 여부 (false면 대체 기준 사용) */
+  hasData: boolean;
+}
+
+export interface PiotroskiResult {
+  score: number;                   // 0–9
+  criteria: PiotroskiCriterion[];
+  tier: 'strong' | 'moderate' | 'weak';
+  color: string;
+  bgColor: string;
+}
+
+export interface PiotroskiInput {
+  returnOnAssets?: number;      // 소수 (0.05 = 5%)
+  operatingCashflow?: number;   // 백만 단위
+  netIncome?: number;           // 백만 단위
+  fcf: number;                  // 백만 단위 (기존 필드)
+  grossMargin: number;          // % (30 = 30%)
+  debtToEquity: number;         // 소수 (0.5 = 50%)
+  currentRatio: number;
+  operatingMargin: number;      // %
+  roe: number;                  // %
+  netMargin: number;            // %
+}
+
+/**
+ * 피오트로스키 F-스코어 (가용 데이터 기반 실용적 버전)
+ *
+ * [수익성 — 4점]
+ *   F1: ROA > 0
+ *   F2: 영업현금흐름 > 0
+ *   F3: 영업현금흐름 > 순이익 (이익 품질)
+ *   F4: 매출총이익률 ≥ 20%
+ *
+ * [재무건전성 — 3점]
+ *   F5: D/E ≤ 1.0
+ *   F6: 유동비율 ≥ 1.5
+ *   F7: 영업이익률 > 0%
+ *
+ * [운영효율 — 2점]
+ *   F8: ROE ≥ 10%
+ *   F9: 순이익률 ≥ 5%
+ */
+export function calculatePiotroski(input: PiotroskiInput): PiotroskiResult {
+  const {
+    returnOnAssets, operatingCashflow, netIncome, fcf,
+    grossMargin, debtToEquity, currentRatio,
+    operatingMargin, roe, netMargin,
+  } = input;
+
+  const criteria: PiotroskiCriterion[] = [
+    /* ── 수익성 ── */
+    {
+      id: 'roa_positive',
+      category: 'profitability',
+      passed:   returnOnAssets != null ? returnOnAssets > 0 : netMargin > 0,
+      valueStr: returnOnAssets != null
+        ? `ROA ${(returnOnAssets * 100).toFixed(1)}%`
+        : `NM ${netMargin.toFixed(1)}%`,
+      hasData: returnOnAssets != null,
+    },
+    {
+      id: 'ocf_positive',
+      category: 'profitability',
+      passed:   operatingCashflow != null ? operatingCashflow > 0 : fcf > 0,
+      valueStr: operatingCashflow != null
+        ? `OCF ${operatingCashflow.toFixed(0)}M`
+        : `FCF ${fcf.toFixed(0)}M`,
+      hasData: operatingCashflow != null,
+    },
+    {
+      id: 'accrual',
+      category: 'profitability',
+      passed:   (operatingCashflow != null && netIncome != null)
+        ? operatingCashflow > netIncome
+        : fcf > 0,
+      valueStr: (operatingCashflow != null && netIncome != null)
+        ? `OCF ${operatingCashflow >= netIncome ? '>' : '<'} NI`
+        : `FCF ${fcf > 0 ? '>0' : '≤0'}`,
+      hasData: operatingCashflow != null && netIncome != null,
+    },
+    {
+      id: 'gross_margin',
+      category: 'profitability',
+      passed:   grossMargin >= 20,
+      valueStr: `GM ${grossMargin.toFixed(1)}%`,
+      hasData: true,
+    },
+    /* ── 재무건전성 ── */
+    {
+      id: 'low_leverage',
+      category: 'leverage',
+      passed:   debtToEquity <= 1.0,
+      valueStr: `D/E ${debtToEquity.toFixed(2)}`,
+      hasData: true,
+    },
+    {
+      id: 'liquidity',
+      category: 'leverage',
+      passed:   currentRatio >= 1.5,
+      valueStr: `CR ${currentRatio.toFixed(2)}`,
+      hasData: true,
+    },
+    {
+      id: 'operating_positive',
+      category: 'leverage',
+      passed:   operatingMargin > 0,
+      valueStr: `OM ${operatingMargin.toFixed(1)}%`,
+      hasData: true,
+    },
+    /* ── 운영효율 ── */
+    {
+      id: 'roe_strong',
+      category: 'efficiency',
+      passed:   roe >= 10,
+      valueStr: `ROE ${roe.toFixed(1)}%`,
+      hasData: true,
+    },
+    {
+      id: 'net_margin',
+      category: 'efficiency',
+      passed:   netMargin >= 5,
+      valueStr: `NM ${netMargin.toFixed(1)}%`,
+      hasData: true,
+    },
+  ];
+
+  const score  = criteria.filter(c => c.passed).length;
+  const tier   = score >= 7 ? 'strong' : score >= 4 ? 'moderate' : 'weak';
+  const color   = tier === 'strong' ? 'text-emerald-400' : tier === 'moderate' ? 'text-amber-400' : 'text-rose-400';
+  const bgColor = tier === 'strong' ? 'bg-emerald-500/10' : tier === 'moderate' ? 'bg-amber-500/10' : 'bg-rose-500/10';
+
+  return { score, criteria, tier, color, bgColor };
+}
+
+/* ─────────────────────────────────────────────
+ * 10. 그린블라트 마법 공식
+ *     이익수익률(EY) + 자본수익률(ROC) 복합 평가
+ * ───────────────────────────────────────────── */
+export type MagicTier = 'high' | 'medium' | 'low';
+
+export interface MagicFormulaResult {
+  /** 이익수익률 % (예: 8.5) */
+  earningsYield: number;
+  /** 자본수익률 % (예: 22.4) */
+  roc: number;
+  /** EY 구간 */
+  eyTier: MagicTier;
+  /** ROC 구간 */
+  rocTier: MagicTier;
+  /** 복합 점수 2–6 */
+  compositeScore: number;
+  /** 종합 투자 매력도 */
+  attractiveness: MagicTier;
+  /** Tailwind text color class */
+  color: string;
+  /** Tailwind bg color class */
+  bgColor: string;
+  /** 계산에 필요한 데이터 존재 여부 */
+  hasData: boolean;
+}
+
+/**
+ * 그린블라트 마법 공식 (근사치)
+ *
+ * - 이익수익률 = 1 / EV·EBITDA (EBITDA 기반 EV 수익률); PER 폴백
+ * - 자본수익률 = ROE × 0.7 + 영업이익률 × 0.3 (가중 평균 근사)
+ *
+ * 원본(EBIT/EV, EBIT/InvestedCapital)과 완전히 동일하지 않으나
+ * 가용 데이터 범위 내 최선 근사치를 사용합니다.
+ */
+export function calculateMagicFormula(
+  evEbitda: number,
+  per: number,
+  roe: number,
+  operatingMargin: number,
+): MagicFormulaResult {
+  let earningsYield = 0;
+  let hasData = false;
+
+  if (evEbitda > 0 && isFinite(evEbitda)) {
+    earningsYield = (1 / evEbitda) * 100;
+    hasData = true;
+  } else if (per > 0 && isFinite(per)) {
+    earningsYield = (1 / per) * 100;
+    hasData = true;
+  }
+
+  // ROC: ROE 70% + 영업이익률 30% 가중 평균
+  const roc = Math.max(roe, 0) * 0.7 + Math.max(operatingMargin, 0) * 0.3;
+
+  const eyTier:  MagicTier = earningsYield >= 12 ? 'high' : earningsYield >= 6 ? 'medium' : 'low';
+  const rocTier: MagicTier = roc >= 20            ? 'high' : roc >= 10          ? 'medium' : 'low';
+
+  const eyScore  = eyTier  === 'high' ? 3 : eyTier  === 'medium' ? 2 : 1;
+  const rocScore = rocTier === 'high' ? 3 : rocTier === 'medium' ? 2 : 1;
+  const compositeScore = eyScore + rocScore;
+
+  const attractiveness: MagicTier =
+    compositeScore >= 5 ? 'high' :
+    compositeScore >= 3 ? 'medium' : 'low';
+
+  const color   = attractiveness === 'high' ? 'text-emerald-400'
+                : attractiveness === 'medium' ? 'text-amber-400' : 'text-rose-400';
+  const bgColor = attractiveness === 'high' ? 'bg-emerald-500/10'
+                : attractiveness === 'medium' ? 'bg-amber-500/10' : 'bg-rose-500/10';
+
+  return {
+    earningsYield: Math.round(earningsYield * 10) / 10,
+    roc:           Math.round(roc * 10) / 10,
+    eyTier,
+    rocTier,
+    compositeScore,
+    attractiveness,
+    color,
+    bgColor,
+    hasData,
+  };
+}
