@@ -1092,3 +1092,174 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     lookbackDays:   LOOKBACK,
   };
 }
+
+/* ══════════════════════════════════════════════════════════════
+ * 14. 크립토 전용 백테스팅 엔진 (45일 온체인 시뮬레이션)
+ *
+ * 알고리즘 (주식 백테스터와 차별화):
+ *   ① chartRows[n−45 .. n−15] 구간을 순회 (14일 미래 확보)
+ *   ② 각 시점에서 온체인 3대 지표(NVT·MVRV·Puell) + StochRSI %K 재계산
+ *   ③ 합산 점수 ≥ 60 → 매수 시그널
+ *   ④ 14거래일 내 최고가가 진입가 ×1.10 이상 → 적중 (+10% 터치 기준)
+ *
+ * CryptoChartRow(close, high, volume, stochK…) ⊇ CryptoBacktestBar
+ * → 순환 참조 없이 duck-type 전달 가능
+ * ══════════════════════════════════════════════════════════════ */
+
+/** 크립토 백테스팅용 최소 차트 행 (CryptoChartRow와 duck-type 호환) */
+interface CryptoBacktestBar {
+  close:  number;
+  high?:  number;
+  volume: number;
+  stochK: number | null;
+}
+
+export interface CryptoBacktestResult {
+  /** 예측 적중률 % — 14거래일 내 +10% 터치 기준 */
+  hitRate:         number;
+  /** 매수 시그널 총 횟수 */
+  totalSignals:    number;
+  /** 그 중 +10% 이상 터치 횟수 */
+  correctSignals:  number;
+  /** 시그널 후 14거래일 내 평균 최고 수익률 % */
+  avgPeakGainPct:  number;
+  /** 시그널 후 14거래일 종가 기준 평균 수익률 % */
+  avgReturnPct:    number;
+  /** 사용한 회고 기간 (일) */
+  lookbackDays:    number;
+}
+
+export interface CryptoBacktestInput {
+  chartRows:    CryptoBacktestBar[];
+  marketCapRaw: number;
+}
+
+/* ── 내부 헬퍼: 온체인 시그널 근사 ─────────────────────────── */
+
+/** NVT 비율 근사 (marketCap ÷ 28일 평균 달러 거래량) */
+function _nvt(prices: number[], volumes: number[], marketCapRaw: number): CryptoMetric['signal'] {
+  const n = prices.length;
+  if (n < 3 || marketCapRaw <= 0) return 'normal';
+  const lb = Math.min(28, n);
+  let dvol = 0;
+  for (let i = n - lb; i < n; i++) dvol += prices[i] * (volumes[i] ?? 0);
+  const avg = dvol / lb;
+  if (avg <= 0) return 'normal';
+  const v = marketCapRaw / avg;
+  return v < 15 ? 'cold' : v < 50 ? 'normal' : v < 100 ? 'caution' : 'hot';
+}
+
+/** MVRV Z-스코어 근사 (가격 Z-점수) */
+function _mvrv(prices: number[]): CryptoMetric['signal'] {
+  const slice = prices.slice(-Math.min(90, prices.length));
+  if (slice.length < 10) return 'normal';
+  const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+  const std  = Math.sqrt(slice.reduce((s, p) => s + (p - mean) ** 2, 0) / slice.length) || 1;
+  const z    = (prices[prices.length - 1] - mean) / std;
+  return z < -1 ? 'cold' : z < 1.5 ? 'normal' : z < 3 ? 'caution' : 'hot';
+}
+
+/** 퓨엘 멀티플 근사 (당일 달러 거래량 ÷ 90일 평균) */
+function _puell(prices: number[], volumes: number[]): CryptoMetric['signal'] {
+  const n = prices.length;
+  if (n < 3) return 'normal';
+  const curr = prices[n - 1] * (volumes[n - 1] ?? 0);
+  const lb   = Math.min(90, n);
+  let dvol   = 0;
+  for (let i = n - lb; i < n; i++) dvol += prices[i] * (volumes[i] ?? 0);
+  const avg = dvol / lb;
+  if (avg <= 0) return 'normal';
+  const pm = curr / avg;
+  return pm < 0.5 ? 'cold' : pm < 1.5 ? 'normal' : pm < 3 ? 'caution' : 'hot';
+}
+
+/** 온체인 시그널 → 점수 (0–25점, runBacktest의 onChainPts와 동일 로직) */
+function _onChainPts(s: CryptoMetric['signal']): number {
+  return s === 'cold' ? 25 : s === 'normal' ? 20 : s === 'caution' ? 8 : 0;
+}
+
+/**
+ * 크립토 전용 백테스팅 엔진
+ *
+ * · 주식 백테스터와 다른 점:
+ *   - 보유 기간 14거래일 (주식: 30거래일)
+ *   - 적중 기준 +10% (주식: +5%) — 크립토 변동성 반영
+ *   - 탐색 윈도우 45일 (주식: 90일)
+ *   - 시그널 기준: 3대 온체인 지표 + StochRSI ≥ 60점
+ */
+export function runCryptoBacktest(input: CryptoBacktestInput): CryptoBacktestResult {
+  const { chartRows, marketCapRaw } = input;
+
+  const n           = chartRows.length;
+  const HOLDING     = 14;
+  const LOOKBACK    = Math.min(45, n);
+  const HIT_TARGET  = 1.10;                           // +10% 터치 기준
+  const signalStart = Math.max(0, n - LOOKBACK);
+  const signalEnd   = Math.max(0, n - HOLDING - 1);
+
+  const signals: Array<{ idx: number; entryPrice: number }> = [];
+
+  for (let i = signalStart; i <= signalEnd; i++) {
+    const row  = chartRows[i];
+
+    // 해당 시점까지의 가격·거래량 배열
+    const prices  = chartRows.slice(0, i + 1).map(r => r.close);
+    const volumes = chartRows.slice(0, i + 1).map(r => r.volume);
+
+    const k = row.stochK ?? 50;
+    const stochPts = k <= 20 ? 25 : k <= 40 ? 20 : k <= 60 ? 15 : k <= 80 ? 5 : 0;
+
+    const totalScore =
+      _onChainPts(_nvt(prices, volumes, marketCapRaw)) +
+      _onChainPts(_mvrv(prices))                       +
+      _onChainPts(_puell(prices, volumes))             +
+      stochPts;
+
+    if (totalScore >= 60) signals.push({ idx: i, entryPrice: row.close });
+  }
+
+  if (signals.length === 0) {
+    return {
+      hitRate: 50.0, totalSignals: 0, correctSignals: 0,
+      avgPeakGainPct: 0, avgReturnPct: 0, lookbackDays: LOOKBACK,
+    };
+  }
+
+  let hits      = 0;
+  let totalPeak = 0;
+  let totalRet  = 0;
+
+  for (const sig of signals) {
+    const exitIdx = Math.min(sig.idx + HOLDING, n - 1);
+
+    let peakPrice = chartRows[sig.idx].high ?? chartRows[sig.idx].close;
+    for (let j = sig.idx + 1; j <= exitIdx; j++) {
+      const h = chartRows[j].high ?? chartRows[j].close;
+      if (h > peakPrice) peakPrice = h;
+    }
+
+    const peakGain = sig.entryPrice > 0 ? (peakPrice - sig.entryPrice) / sig.entryPrice : 0;
+    const exitRet  = sig.entryPrice > 0
+      ? (chartRows[exitIdx].close - sig.entryPrice) / sig.entryPrice
+      : 0;
+
+    if (sig.entryPrice > 0 && peakPrice >= sig.entryPrice * HIT_TARGET) hits++;
+    totalPeak += peakGain;
+    totalRet  += exitRet;
+  }
+
+  const cnt = signals.length;
+  return {
+    hitRate:        Math.round((hits / cnt) * 1000) / 10,
+    totalSignals:   cnt,
+    correctSignals: hits,
+    avgPeakGainPct: Math.round((totalPeak / cnt) * 1000) / 10,
+    avgReturnPct:   Math.round((totalRet  / cnt) * 1000) / 10,
+    lookbackDays:   LOOKBACK,
+  };
+}
+
+// CryptoMetric['signal'] 타입 재사용 — 순환 import 없이 analysis.ts 내부에서만 사용
+// (lib/types.ts의 CryptoMetric을 임시 로컬 타입으로 확장)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type CryptoMetric = { signal: 'cold' | 'normal' | 'caution' | 'hot' };

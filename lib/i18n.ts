@@ -984,6 +984,29 @@ const crypto = {
       },
     ] as { emoji: string; name: string; fullName: string; creator: string; desc: string; note: string }[],
 
+    /* ── 크립토 AI 백테스팅 리포트 (CryptoBacktestReportCard) ── */
+    ctReportTitle:       'AI 온체인 알고리즘 과거 적중률 검증 리포트',
+    ctReportSub:         '{n}일 가상 시뮬레이션 기반 통계',
+    /* 메트릭 1: 크립토 예측 적중률 */
+    ctHitRateLabel:      '크립토 예측 적중률',
+    ctHitRateEnLabel:    'Crypto Hit Rate',
+    ctHitRateTooltip:    "크립토 적중률 산출 공식: 최근 45일 전 시점부터 당사의 3대 온체인 지표(MVRV Z-Score, 퓨엘 멀티플, NVT)와 스토캐스틱 RSI가 '매수(Buy)' 시그널을 동시 만족한 과거 시점을 추적합니다. 24시간 변동성이 높은 크립토 시장 특성을 고려하여, 신호 발생 후 단기 14일 이내에 코인 가격이 실제 목표치(+10%) 이상 돌파하며 수익 구간을 터치했는지 검증한 실제 통계 승률입니다.",
+    ctOutOf:             '/',
+    ctCorrectLabel:      '회 적중',
+    /* 메트릭 2: 평균 최고 수익률 */
+    ctAvgPeakLabel:      '시그널 후 14일 내 평균 최고 수익률',
+    ctAvgPeakEnLabel:    'Avg 14d Peak Gain',
+    ctAvgPeakDesc:       '14거래일 내 최고 수익률 평균',
+    /* 메트릭 3: 시그널 수 */
+    ctSignalCountLabel:  '검증된 온체인 시그널',
+    ctSignalCountEnLabel: 'On-chain Signals',
+    ctSignalCountUnit:   '회 구간',
+    /* 공통 */
+    ctNoSignalMsg:       '탐색 구간 내 온체인 매수 시그널 없음 — 데이터 추가 후 재시도하세요.',
+    ctSimNote:           '가상 시뮬레이션 기반 통계 · NVT, MVRV, Puell 지표 근사치 사용 · 24시간 크립토 시장 특성 반영 · 실제 투자 결과와 다를 수 있음',
+    ctHoldingDays:       '14일 보유 기간',
+    ctThreshold:         '적중 기준 +10%',
+
     /* ── 강력 면책조항 ──────────────────────────────────── */
     disclaimerTitle:  '⚠️ 가상화폐 투자 유의사항',
     disclaimerBody:   '가상화폐는 주식 시장과 달리 상하한가 제한이 없고 24시간 연중무휴로 거래되므로 변동성이 극도로 높습니다. 본 서비스가 제공하는 온체인 지표 및 AI 종합 의견은 공개된 시장 데이터를 기반으로 가공된 참고용 수치일 뿐, 특정 자산의 매수/매도를 추천하거나 수익을 보장하지 않습니다. 모든 투자 판단의 최종 책임은 전적으로 투자자 본인에게 있으며, 본 서비스는 투자 결과로 발생한 어떠한 손실에 대해서도 법적 책임을 지지 않습니다.',
@@ -1141,6 +1164,29 @@ const crypto = {
         note: '※ This service approximates using current dollar volume ÷ 90-day average dollar volume.',
       },
     ] as { emoji: string; name: string; fullName: string; creator: string; desc: string; note: string }[],
+
+    /* ── Crypto AI Backtesting Report (CryptoBacktestReportCard) ── */
+    ctReportTitle:       'AI On-Chain Algorithm Hit Rate Validation Report',
+    ctReportSub:         '{n}-day virtual simulation statistics',
+    /* Metric 1: Crypto Hit Rate */
+    ctHitRateLabel:      'Crypto Predicted Hit Rate',
+    ctHitRateEnLabel:    'Crypto Hit Rate',
+    ctHitRateTooltip:    "Crypto Hit Rate Formula: We track past instances from 45 days ago where our 3 on-chain metrics (MVRV Z-Score, Puell Multiple, NVT) and Stoch RSI simultaneously triggered a 'Buy'. Given crypto's 24/7 high volatility, this represents the actual win rate where the price successfully surged above the +10% target within a short 14-day window post-signal.",
+    ctOutOf:             '/',
+    ctCorrectLabel:      'correct',
+    /* Metric 2: Avg Peak Return */
+    ctAvgPeakLabel:      'Avg 14d Peak Return Post-Signal',
+    ctAvgPeakEnLabel:    'Avg 14d Peak Gain',
+    ctAvgPeakDesc:       'Peak gain within 14 trading days of signal',
+    /* Metric 3: Signal Count */
+    ctSignalCountLabel:  'Total Verified On-chain Signals',
+    ctSignalCountEnLabel: 'On-chain Signals',
+    ctSignalCountUnit:   'signal events',
+    /* Common */
+    ctNoSignalMsg:       'No on-chain buy signals found in the search window — retry after more data is available.',
+    ctSimNote:           'Virtual simulation statistics · NVT, MVRV, Puell approximated · Reflects 24/7 crypto market characteristics · Actual results may differ.',
+    ctHoldingDays:       '14-day holding period',
+    ctThreshold:         '+10% touch threshold',
 
     /* ── Strong Disclaimer ─────────────────────────────── */
     disclaimerTitle:  '⚠️ Cryptocurrency Investment Notice',

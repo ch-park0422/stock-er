@@ -13,7 +13,7 @@
  * · 모바일 반응형
  */
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
   ComposedChart, Line, Area,
@@ -23,10 +23,12 @@ import {
 import {
   Search, RefreshCw, Globe, ArrowUpRight, ArrowDownRight,
   TrendingUp, BarChart2, ServerCrash, Activity, BookOpen,
+  HelpCircle, Info,
 } from 'lucide-react';
 
 import type { CryptoData, CryptoChartRow, CryptoMetric } from '@/lib/types';
 import { translations, type Lang, type CryptoT } from '@/lib/i18n';
+import { runCryptoBacktest, type CryptoBacktestResult } from '@/lib/analysis';
 
 /* ─────────────────────────────────────────────
  * 유틸
@@ -286,6 +288,182 @@ function CryptoSentimentCard({ data, t }: { data: CryptoData; t: CryptoT }) {
       {/* 주석 */}
       <p className="text-[10px] text-gray-700 mt-3 pt-3 border-t border-gray-800">
         {t.sentimentNote}
+      </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * 1-B. CryptoBacktestReportCard — 크립토 AI 백테스팅 리포트
+ *       3대 퀀트 메트릭 와이드 카드 (Crypto Sentiment AI 직하 배치)
+ * ═══════════════════════════════════════════════════════════════ */
+
+/** 히트레이트 → 하이라이트 컬러 */
+function ctHitColor(r: number): string {
+  return r >= 65 ? 'text-emerald-400' : r >= 50 ? 'text-violet-300' : 'text-rose-400';
+}
+/** 히트레이트 → 배지 클래스 */
+function ctHitBadge(r: number): string {
+  return r >= 65
+    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+    : r >= 50
+    ? 'bg-violet-500/15 text-violet-300 border-violet-500/30'
+    : 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+}
+
+function CryptoBacktestReportCard({ data, t }: { data: CryptoData; t: CryptoT }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  /* 바깥 클릭 → 툴팁 닫기 */
+  useEffect(() => {
+    if (!showTooltip) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node))
+        setShowTooltip(false);
+    };
+    document.addEventListener('mousedown', close, true);
+    document.addEventListener('touchstart', close, true);
+    return () => {
+      document.removeEventListener('mousedown', close, true);
+      document.removeEventListener('touchstart', close, true);
+    };
+  }, [showTooltip]);
+
+  /* 백테스팅 계산 */
+  const bt: CryptoBacktestResult = useMemo(() => runCryptoBacktest({
+    chartRows:    data.chartRows,
+    marketCapRaw: data.marketCapRaw,
+  }), [data.chartRows, data.marketCapRaw]);
+
+  const noSignal = bt.totalSignals === 0;
+  const subText  = (t.ctReportSub as string).replace('{n}', String(bt.lookbackDays));
+  const peakColor = bt.avgPeakGainPct >= 15
+    ? 'text-emerald-400' : bt.avgPeakGainPct >= 0 ? 'text-violet-300' : 'text-rose-400';
+
+  return (
+    <div className="bg-[#0a0614] border border-violet-900/30 rounded-2xl p-4 sm:p-6 shadow-xl shadow-violet-900/10">
+
+      {/* 카드 헤더 */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5 sm:mb-6">
+        <div>
+          <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2">
+            <span className="w-5 h-5 rounded-md bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-[11px] flex-shrink-0">📊</span>
+            {t.ctReportTitle}
+          </h3>
+          <p className="text-gray-500 text-xs mt-1">{subText}</p>
+        </div>
+        {/* 시그널 요약 배지 */}
+        {!noSignal && (
+          <span className={cn(
+            'text-[10px] font-bold px-2.5 py-1 rounded-full border flex-shrink-0',
+            ctHitBadge(bt.hitRate),
+          )}>
+            {bt.hitRate.toFixed(1)}% {t.ctHitRateEnLabel}
+          </span>
+        )}
+      </div>
+
+      {/* 시그널 없음 */}
+      {noSignal ? (
+        <div className="flex items-center gap-3 px-4 py-5 rounded-2xl bg-violet-900/10 border border-violet-900/25">
+          <Info className="w-4 h-4 text-gray-600 flex-shrink-0" />
+          <p className="text-gray-500 text-sm">{t.ctNoSignalMsg}</p>
+        </div>
+      ) : (
+        /* ── 3대 핵심 메트릭 그리드 ── */
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+
+          {/* 메트릭 1: 크립토 예측 적중률 + 툴팁 */}
+          <div className="bg-[#0f0820]/70 border border-violet-900/25 rounded-2xl p-4 sm:p-5 flex flex-col gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap" ref={tooltipRef}>
+              <span className="text-xs font-semibold text-gray-400">{t.ctHitRateLabel}</span>
+              <span className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowTooltip(v => !v)}
+                  aria-label="크립토 적중률 산출 공식 설명"
+                  className={cn(
+                    'p-0.5 -m-0.5 transition-colors rounded touch-manipulation',
+                    showTooltip ? 'text-violet-400' : 'text-gray-600 hover:text-violet-400',
+                  )}
+                >
+                  <HelpCircle className="w-3.5 h-3.5" />
+                </button>
+                {showTooltip && (
+                  <div
+                    role="tooltip"
+                    className={cn(
+                      'absolute z-50 bottom-full mb-3',
+                      'left-0 sm:left-1/2 sm:-translate-x-1/2',
+                      'w-64 sm:w-80',
+                      'rounded-2xl px-4 py-3',
+                      'bg-[#0d0820] border border-violet-500/25',
+                      'text-[11px] text-gray-300 leading-relaxed',
+                      'shadow-2xl shadow-black/70',
+                    )}
+                  >
+                    {t.ctHitRateTooltip}
+                    <span className={cn(
+                      'absolute top-full border-x-4 border-x-transparent border-t-4 border-t-[#0d0820]',
+                      'left-4 sm:left-1/2 sm:-translate-x-1/2',
+                    )} />
+                  </div>
+                )}
+              </span>
+              <span className="text-[10px] text-gray-600">{t.ctHitRateEnLabel}</span>
+            </div>
+            <p className={cn('text-3xl md:text-4xl font-extrabold leading-none tabular-nums', ctHitColor(bt.hitRate))}>
+              {bt.hitRate.toFixed(1)}%
+            </p>
+            <p className="text-[11px] text-gray-600">
+              <span className="font-semibold text-gray-400">{bt.correctSignals}</span>
+              {t.ctOutOf}
+              <span className="font-semibold text-gray-400">{bt.totalSignals}</span>
+              {' '}{t.ctCorrectLabel}
+            </p>
+            <div className="mt-auto pt-2 border-t border-violet-900/20">
+              <span className="text-[10px] text-gray-700">{t.ctThreshold}</span>
+            </div>
+          </div>
+
+          {/* 메트릭 2: 14일 내 평균 최고 수익률 */}
+          <div className="bg-[#0f0820]/70 border border-violet-900/25 rounded-2xl p-4 sm:p-5 flex flex-col gap-2">
+            <div>
+              <span className="text-xs font-semibold text-gray-400">{t.ctAvgPeakLabel}</span>
+              <p className="text-[10px] text-gray-600">{t.ctAvgPeakEnLabel}</p>
+            </div>
+            <p className={cn('text-3xl md:text-4xl font-extrabold leading-none tabular-nums', peakColor)}>
+              {bt.avgPeakGainPct >= 0 ? '+' : ''}{bt.avgPeakGainPct.toFixed(1)}%
+            </p>
+            <p className="text-[11px] text-gray-600">{t.ctAvgPeakDesc}</p>
+            <div className="mt-auto pt-2 border-t border-violet-900/20">
+              <span className="text-[10px] text-gray-700">{t.ctHoldingDays}</span>
+            </div>
+          </div>
+
+          {/* 메트릭 3: 검증된 온체인 시그널 수 */}
+          <div className="bg-[#0f0820]/70 border border-violet-900/25 rounded-2xl p-4 sm:p-5 flex flex-col gap-2">
+            <div>
+              <span className="text-xs font-semibold text-gray-400">{t.ctSignalCountLabel}</span>
+              <p className="text-[10px] text-gray-600">{t.ctSignalCountEnLabel}</p>
+            </div>
+            <p className="text-3xl md:text-4xl font-extrabold leading-none tabular-nums text-white">
+              {bt.totalSignals}
+            </p>
+            <p className="text-[11px] text-gray-600">{t.ctSignalCountUnit}</p>
+            <div className="mt-auto pt-2 border-t border-violet-900/20">
+              <span className="text-[10px] text-gray-700">
+                {bt.lookbackDays}일 {t.ctReportSub.split('{n}일')[1] ?? ''}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 시뮬레이션 면책 주석 */}
+      <p className="text-[10px] text-gray-700 mt-4 pt-4 border-t border-violet-900/20 leading-relaxed">
+        ⚠️ {t.ctSimNote}
       </p>
     </div>
   );
@@ -919,10 +1097,13 @@ export default function CryptoDashboard() {
 
       {/* ── MAIN ────────────────────────────────────── */}
       {cryptoData && (
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 space-y-6 sm:space-y-8">
 
           {/* ❶ 종합 투자 의견 카드 */}
           <CryptoSentimentCard data={cryptoData} t={t} />
+
+          {/* ❶-B AI 온체인 백테스팅 리포트 */}
+          <CryptoBacktestReportCard data={cryptoData} t={t} />
 
           {/* ❷ 프로필 카드 */}
           <CryptoProfileCard
@@ -946,7 +1127,7 @@ export default function CryptoDashboard() {
             </div>
             <p className="text-xs text-gray-600 mb-3">{t.onChainSub}</p>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
               <OnChainCard
                 emoji="🔗"
                 title={t.nvtTitle}
@@ -994,7 +1175,7 @@ export default function CryptoDashboard() {
               <BarChart2 className="w-3.5 h-3.5 text-violet-700 flex-shrink-0" />
             </div>
 
-            <div className="space-y-4 sm:space-y-5">
+            <div className="space-y-5 sm:space-y-6">
               <CryptoPriceChart rows={cryptoData.chartRows} t={t} />
               <StochRSIChart
                 rows={cryptoData.chartRows}
