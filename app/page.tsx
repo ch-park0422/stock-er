@@ -1536,6 +1536,18 @@ export default function StockDashboard() {
               </span>
             </div>
 
+            {/* GNB 탭 */}
+            <div className="flex gap-0.5 p-0.5 rounded-xl flex-shrink-0"
+              style={{ backgroundColor: '#111827', border: '1px solid #1f2d3d' }}>
+              <div className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white">
+                {t.navStock}
+              </div>
+              <Link href="/crypto"
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors">
+                {t.navCrypto}
+              </Link>
+            </div>
+
             {/*
              * 검색창
              * · 모바일: order-last → 로고/버튼 아래 행, w-full

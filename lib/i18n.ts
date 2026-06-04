@@ -253,6 +253,10 @@ const dashboard = {
       low:    '낮음',
     } as Record<string, string>,
     magicNote: '※ EV/EBITDA 미제공 시 PER 기반으로 대체 계산됩니다.',
+
+    /* ── GNB 탐색 링크 ──────────────────────────────────── */
+    navStock:  '📊 주식',
+    navCrypto: '₿ 크립토',
   },
 
   en: {
@@ -494,6 +498,10 @@ const dashboard = {
       low:    'Low',
     } as Record<string, string>,
     magicNote: '※ Falls back to P/E-based EY when EV/EBITDA is unavailable.',
+
+    /* ── GNB navigation links ───────────────────────────── */
+    navStock:  '📊 Stocks',
+    navCrypto: '₿ Crypto',
   },
 } as const;
 
@@ -715,15 +723,165 @@ const about = {
 } as const;
 
 // ─────────────────────────────────────────────
+// Crypto page (app/crypto/page.tsx)
+// ─────────────────────────────────────────────
+const crypto = {
+  ko: {
+    /* Header */
+    brandTag:          'AI 크립토 분석',
+    searchPlaceholder: '코인 이름 또는 티커 (BTC, ETH, SOL…)',
+    searchBtn:         '검색',
+    searching:         '조회 중',
+    loadingTitle:      (t: string) => `${t} 분석 중…`,
+    loadingSubtitle:   '실시간 데이터를 불러오고 있습니다',
+    errorTitle:        'API 호출 불가',
+    errorSubtitle:     (t: string) => `${t} 데이터를 불러올 수 없습니다.`,
+    retryBtn:          '다시 시도',
+
+    /* GNB */
+    navStock:  '📊 주식',
+    navCrypto: '₿ 크립토',
+
+    /* ProfileCard */
+    currentPrice: '현재 가격',
+    change24h:    '24h 변동',
+    marketCap:    '시가총액',
+    volume24h:    '24h 거래량',
+    week52Range:  '52주 범위',
+    week52Pos:    (pct: number) => `52주 범위의 ${pct}% 위치`,
+    dataRefresh:  '새로고침',
+
+    /* On-Chain Section */
+    onChainTitle: '온체인 기본적 분석',
+    onChainSub:   '거래 데이터 기반 근사치 시뮬레이션',
+
+    nvtTitle:    'NVT 비율',
+    nvtFullName: 'Network Value to Transactions',
+    nvtDesc:     '시가총액 / 28일 평균 달러 거래량',
+    nvtGuide:    '낮을수록 거래 대비 저평가, 높을수록 투기적 과열',
+
+    mvrvTitle:    'MVRV Z-스코어',
+    mvrvFullName: 'Market Value to Realized Value',
+    mvrvDesc:     '(현재가 − 90일 평균) / 90일 표준편차',
+    mvrvGuide:    '음수는 과매도·매집, 높은 양수는 극단적 과열',
+
+    puellTitle:    '퓨엘 멀티플',
+    puellFullName: 'Puell Multiple',
+    puellDesc:     '당일 달러 거래량 / 90일 평균 달러 거래량',
+    puellGuide:    '낮을수록 채굴 수익 부진(매수 기회), 높을수록 과열 신호',
+
+    signalLabels: {
+      cold:    '❄️ 냉각 · 매집',
+      normal:  '✅ 정상 범주',
+      caution: '⚠️ 주의 구간',
+      hot:     '🔥 과열 · 분배',
+    } as Record<string, string>,
+    indicatorZones: ['냉각', '정상', '주의', '과열'] as string[],
+    onChainNote: '※ 실제 온체인 데이터가 아닌 거래량·가격 기반 시뮬레이션 근사치입니다. 참고 목적으로만 활용하세요.',
+
+    /* Chart Section */
+    priceChartTitle: '가격 차트 + EMA 리본 (20 · 50 · 200)',
+    close:           '종가',
+    ema20Label:      'EMA 20',
+    ema50Label:      'EMA 50',
+    ema200Label:     'EMA 200',
+    stochTitle:      'Stochastic RSI',
+    stochSub:        '(%K · %D, 14-period)',
+    overbought:      '과매수',
+    oversold:        '과매도',
+    neutralZone:     '중립',
+    zone:            '구간',
+
+    /* Footer */
+    footerData: '실시간 시장 데이터 (Yahoo Finance)',
+    footerNote: '실제 투자 결정에 활용하지 마세요.',
+    disclaimer:  '본 서비스는 참고용 분석 도구이며, 투자 결과에 대한 책임을 지지 않습니다.',
+  },
+
+  en: {
+    /* Header */
+    brandTag:          'AI Crypto Analysis',
+    searchPlaceholder: 'Enter coin name or ticker (BTC, ETH, SOL…)',
+    searchBtn:         'Search',
+    searching:         'Loading',
+    loadingTitle:      (t: string) => `Analyzing ${t}…`,
+    loadingSubtitle:   'Fetching real-time market data',
+    errorTitle:        'API Unavailable',
+    errorSubtitle:     (t: string) => `Unable to load data for ${t}.`,
+    retryBtn:          'Retry',
+
+    /* GNB */
+    navStock:  '📊 Stocks',
+    navCrypto: '₿ Crypto',
+
+    /* ProfileCard */
+    currentPrice: 'Current Price',
+    change24h:    '24h Change',
+    marketCap:    'Market Cap',
+    volume24h:    '24h Volume',
+    week52Range:  '52-Week Range',
+    week52Pos:    (pct: number) => `${pct}% of 52-week range`,
+    dataRefresh:  'Refresh',
+
+    /* On-Chain Section */
+    onChainTitle: 'On-Chain Fundamental Analysis',
+    onChainSub:   'Volume-based approximation (simulation)',
+
+    nvtTitle:    'NVT Ratio',
+    nvtFullName: 'Network Value to Transactions',
+    nvtDesc:     'Market Cap / 28d Avg Dollar Volume',
+    nvtGuide:    'Lower = undervalued vs transactions; Higher = speculative overheating',
+
+    mvrvTitle:    'MVRV Z-Score',
+    mvrvFullName: 'Market Value to Realized Value',
+    mvrvDesc:     '(Current − 90d Mean) / 90d Std Dev',
+    mvrvGuide:    'Negative = oversold / accumulation; High positive = extreme overheating',
+
+    puellTitle:    'Puell Multiple',
+    puellFullName: 'Puell Multiple',
+    puellDesc:     'Current Dollar Volume / 90d Avg Dollar Volume',
+    puellGuide:    'Low = miner revenue stress (buy signal); High = overheating',
+
+    signalLabels: {
+      cold:    '❄️ Cold · Accumulation',
+      normal:  '✅ Normal Range',
+      caution: '⚠️ Caution Zone',
+      hot:     '🔥 Hot · Distribution',
+    } as Record<string, string>,
+    indicatorZones: ['Cold', 'Normal', 'Caution', 'Hot'] as string[],
+    onChainNote: '※ These are simulation approximations based on trading volume, not actual on-chain data.',
+
+    /* Chart Section */
+    priceChartTitle: 'Price Chart + EMA Ribbon (20 · 50 · 200)',
+    close:           'Close',
+    ema20Label:      'EMA 20',
+    ema50Label:      'EMA 50',
+    ema200Label:     'EMA 200',
+    stochTitle:      'Stochastic RSI',
+    stochSub:        '(%K · %D, 14-period)',
+    overbought:      'Overbought',
+    oversold:        'Oversold',
+    neutralZone:     'Neutral',
+    zone:            'Zone',
+
+    /* Footer */
+    footerData: 'Real-time market data (Yahoo Finance)',
+    footerNote: 'Not for actual investment decisions.',
+    disclaimer:  'This service is a reference analysis tool. We bear no responsibility for investment outcomes.',
+  },
+} as const;
+
+// ─────────────────────────────────────────────
 // 공개 export
 // ─────────────────────────────────────────────
 export type Lang = 'ko' | 'en';
 
 export const translations = {
-  ko: { dashboard: dashboard.ko, about: about.ko },
-  en: { dashboard: dashboard.en, about: about.en },
+  ko: { dashboard: dashboard.ko, about: about.ko, crypto: crypto.ko },
+  en: { dashboard: dashboard.en, about: about.en, crypto: crypto.en },
 } as const;
 
 // 두 언어 타입의 합집합 — KO/EN 모두 할당 가능
 export type DashboardT = typeof translations['ko']['dashboard'] | typeof translations['en']['dashboard'];
 export type AboutT     = typeof translations['ko']['about']     | typeof translations['en']['about'];
+export type CryptoT    = typeof translations['ko']['crypto']    | typeof translations['en']['crypto'];
