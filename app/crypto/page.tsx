@@ -336,9 +336,10 @@ function CryptoBacktestReportCard({ data, t }: { data: CryptoData; t: CryptoT })
     marketCapRaw: data.marketCapRaw,
   }), [data.chartRows, data.marketCapRaw]);
 
-  const noSignal = bt.totalSignals === 0;
+  /* noSignal: 서버에서 계산된 플래그 우선, 없으면 totalSignals로 fallback */
+  const noSignal = bt.noSignal ?? (bt.totalSignals === 0);
   const subText  = (t.ctReportSub as string).replace('{n}', String(bt.lookbackDays));
-  const peakColor = bt.avgPeakGainPct >= 15
+  const peakColor = bt.avgPeakGainPct >= 10
     ? 'text-emerald-400' : bt.avgPeakGainPct >= 0 ? 'text-violet-300' : 'text-rose-400';
 
   return (
@@ -353,7 +354,7 @@ function CryptoBacktestReportCard({ data, t }: { data: CryptoData; t: CryptoT })
           </h3>
           <p className="text-gray-500 text-xs mt-1">{subText}</p>
         </div>
-        {/* 시그널 요약 배지 */}
+        {/* 시그널 요약 배지 — noSignal이면 표시 안 함 */}
         {!noSignal && (
           <span className={cn(
             'text-[10px] font-bold px-2.5 py-1 rounded-full border flex-shrink-0',
@@ -364,11 +365,16 @@ function CryptoBacktestReportCard({ data, t }: { data: CryptoData; t: CryptoT })
         )}
       </div>
 
-      {/* 시그널 없음 */}
+      {/* ── noSignal: "—" 표시 + 안내 ─────────────────────── */}
       {noSignal ? (
-        <div className="flex items-center gap-3 px-4 py-5 rounded-2xl bg-violet-900/10 border border-violet-900/25">
-          <Info className="w-4 h-4 text-gray-600 flex-shrink-0" />
-          <p className="text-gray-500 text-sm">{t.ctNoSignalMsg}</p>
+        <div className="flex flex-col items-center gap-3 px-4 py-6 rounded-2xl bg-violet-900/10 border border-violet-900/25 text-center">
+          <p className="text-4xl font-black text-gray-600 tracking-widest">
+            {t.ctNoSignalShort ?? '—'}
+          </p>
+          <p className="text-gray-500 text-sm leading-relaxed max-w-md">
+            [{t.ctNoSignalDisplay}]
+          </p>
+          <p className="text-[10px] text-gray-700">{t.ctThreshold} · {t.ctHoldingDays}</p>
         </div>
       ) : (
         /* ── 3대 핵심 메트릭 그리드 ── */

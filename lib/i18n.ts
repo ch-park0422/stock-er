@@ -990,7 +990,7 @@ const crypto = {
     /* 메트릭 1: 크립토 예측 적중률 */
     ctHitRateLabel:      '크립토 예측 적중률',
     ctHitRateEnLabel:    'Crypto Hit Rate',
-    ctHitRateTooltip:    "크립토 적중률 산출 공식: 최근 45일 전 시점부터 당사의 3대 온체인 지표(MVRV Z-Score, 퓨엘 멀티플, NVT)와 스토캐스틱 RSI가 '매수(Buy)' 시그널을 동시 만족한 과거 시점을 추적합니다. 24시간 변동성이 높은 크립토 시장 특성을 고려하여, 신호 발생 후 단기 14일 이내에 코인 가격이 실제 목표치(+10%) 이상 돌파하며 수익 구간을 터치했는지 검증한 실제 통계 승률입니다.",
+    ctHitRateTooltip:    "크립토 적중률 산출 공식: 최근 180일(최대) 전 시점부터 MVRV Z-Score · 퓨엘 멀티플 · NVT · 스토캐스틱 RSI %K 4개 지표 중 3개 이상이 동시에 '매수 우위(이진 점수제 70점 이상)' 조건을 만족한 과거 시점을 전수조사합니다. 신호 발생 후 14일 이내에 코인 가격이 목표치(+5%) 이상 돌파하며 수익 구간을 터치했는지 검증한 실제 통계 승률입니다.",
     ctOutOf:             '/',
     ctCorrectLabel:      '회 적중',
     /* 메트릭 2: 평균 최고 수익률 */
@@ -1003,9 +1003,13 @@ const crypto = {
     ctSignalCountUnit:   '회 구간',
     /* 공통 */
     ctNoSignalMsg:       '탐색 구간 내 온체인 매수 시그널 없음 — 데이터 추가 후 재시도하세요.',
-    ctSimNote:           '가상 시뮬레이션 기반 통계 · NVT, MVRV, Puell 지표 근사치 사용 · 24시간 크립토 시장 특성 반영 · 실제 투자 결과와 다를 수 있음',
+    /** 시그널 0건일 때 적중률 수치 대신 표시할 짧은 텍스트 */
+    ctNoSignalShort:     '—',
+    /** 시그널 0건일 때 상세 안내 문구 */
+    ctNoSignalDisplay:   '최근 180일 내 매수 진입 조건 충족 사례 없음',
+    ctSimNote:           '이진 점수제(70점 이상) 시뮬레이션 기반 통계 · NVT, MVRV, Puell 근사치 사용 · 최대 180일 탐색 · 실제 투자 결과와 다를 수 있음',
     ctHoldingDays:       '14일 보유 기간',
-    ctThreshold:         '적중 기준 +10%',
+    ctThreshold:         '적중 기준 +5%',
 
     /* ── 강력 면책조항 ──────────────────────────────────── */
     disclaimerTitle:  '⚠️ 가상화폐 투자 유의사항',
@@ -1171,7 +1175,7 @@ const crypto = {
     /* Metric 1: Crypto Hit Rate */
     ctHitRateLabel:      'Crypto Predicted Hit Rate',
     ctHitRateEnLabel:    'Crypto Hit Rate',
-    ctHitRateTooltip:    "Crypto Hit Rate Formula: We track past instances from 45 days ago where our 3 on-chain metrics (MVRV Z-Score, Puell Multiple, NVT) and Stoch RSI simultaneously triggered a 'Buy'. Given crypto's 24/7 high volatility, this represents the actual win rate where the price successfully surged above the +10% target within a short 14-day window post-signal.",
+    ctHitRateTooltip:    "Crypto Hit Rate Formula: We scan up to 180 days of history and find every day where 3 or more of the 4 on-chain indicators (MVRV, Puell, NVT, Stoch RSI %K) simultaneously show a buying advantage (binary scoring ≥ 70 pts). This percentage is the actual win rate where the coin price surged above +5% within 14 days of the signal.",
     ctOutOf:             '/',
     ctCorrectLabel:      'correct',
     /* Metric 2: Avg Peak Return */
@@ -1184,9 +1188,11 @@ const crypto = {
     ctSignalCountUnit:   'signal events',
     /* Common */
     ctNoSignalMsg:       'No on-chain buy signals found in the search window — retry after more data is available.',
-    ctSimNote:           'Virtual simulation statistics · NVT, MVRV, Puell approximated · Reflects 24/7 crypto market characteristics · Actual results may differ.',
+    ctNoSignalShort:     '—',
+    ctNoSignalDisplay:   'No qualifying buy signals in the last 180 days',
+    ctSimNote:           'Binary scoring matrix (≥70 pts) simulation · NVT, MVRV, Puell approximated · Up to 180-day lookback · Actual results may differ.',
     ctHoldingDays:       '14-day holding period',
-    ctThreshold:         '+10% touch threshold',
+    ctThreshold:         '+5% touch threshold',
 
     /* ── Strong Disclaimer ─────────────────────────────── */
     disclaimerTitle:  '⚠️ Cryptocurrency Investment Notice',
