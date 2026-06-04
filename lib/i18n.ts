@@ -140,6 +140,35 @@ const dashboard = {
         '펀더멘탈·기술적 지표 모두 취약. 손절 또는 회피 권장.',
     } as Record<string, string>,
 
+    /* ── 시장 국면 감지 ─────────────────────────────────── */
+    regimeLabel:    '시장 국면',
+    regimeBull:     '상승장 🟢',
+    regimeBear:     '하락장 🔴',
+    regimeSideways: '횡보장 🟡',
+
+    /* ── 동적 가중치 스코어 ──────────────────────────────── */
+    dynamicScoreTitle:   '국면 조정 종합 점수',
+    dynamicScoreSub:     '시장 국면별 최적 가중치 자동 적용',
+    dynamicWeightsLabel: '적용 가중치',
+    weightFinancial:     '재무건전성',
+    weightGrowth:        '성장성',
+    weightTechnical:     '기술적',
+    dynGrades: {
+      strong_buy:  '★★★ 강력 매수',
+      buy:         '★★ 매수',
+      neutral:     '★ 중립',
+      sell:        '⚠ 매도',
+      strong_sell: '⛔ 강력 매도',
+    } as Record<string, string>,
+
+    /* ── 백테스팅 결과 배지 ─────────────────────────────── */
+    backtestBadge:         '예측 적중률',
+    backtestPeriod:        '과거 시뮬레이션 기반 결과',
+    backtestDays:          '거래일',
+    backtestSignalsSuffix: '회 시그널',
+    backtestAvgReturn:     '시그널 평균 수익률',
+    backtestNoSignals:     '분석 시그널 없음',
+
     /* Charts */
     priceChartTitle: '주가 차트 + 이동평균선 (SMA)',
     close:    '종가',
@@ -385,6 +414,35 @@ const dashboard = {
       '펀더멘탈·기술적 지표 모두 취약. 손절 또는 회피 권장.':
         'Both fundamental and technical indicators are weak. Stop-loss or avoidance recommended.',
     } as Record<string, string>,
+
+    /* ── Market Regime ──────────────────────────────────── */
+    regimeLabel:    'Market Regime',
+    regimeBull:     'Bull Market 🟢',
+    regimeBear:     'Bear Market 🔴',
+    regimeSideways: 'Sideways 🟡',
+
+    /* ── Dynamic Weighted Score ─────────────────────────── */
+    dynamicScoreTitle:   'Regime-Adjusted Score',
+    dynamicScoreSub:     'Optimal weights applied automatically by market regime',
+    dynamicWeightsLabel: 'Applied Weights',
+    weightFinancial:     'Financial Health',
+    weightGrowth:        'Growth',
+    weightTechnical:     'Technical',
+    dynGrades: {
+      strong_buy:  '★★★ Strong Buy',
+      buy:         '★★ Buy',
+      neutral:     '★ Neutral',
+      sell:        '⚠ Sell',
+      strong_sell: '⛔ Strong Sell',
+    } as Record<string, string>,
+
+    /* ── Backtest Badge ──────────────────────────────────── */
+    backtestBadge:         'Hit Rate',
+    backtestPeriod:        'Based on historical simulation',
+    backtestDays:          'trading days',
+    backtestSignalsSuffix: ' signals',
+    backtestAvgReturn:     'Avg Signal Return',
+    backtestNoSignals:     'No signals found',
 
     /* Charts */
     priceChartTitle: 'Price Chart + Moving Averages (SMA)',

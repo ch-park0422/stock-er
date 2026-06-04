@@ -25,6 +25,8 @@ import {
   calculateDCF, getValuationLabel, calculateAIScore,
   detectMACross, calculateHybridValuation,
   calculatePegScore, calculatePiotroski, calculateMagicFormula,
+  calcDynamicWeightedScore, runBacktest,
+  type MarketRegime, type DynamicScoreResult, type BacktestResult,
 } from '@/lib/analysis';
 import type { CompanyFundamentals, MockDataResult, ChartRow } from '@/lib/mockData';
 import type { StockData } from '@/lib/types';
@@ -924,14 +926,35 @@ function FinancialHealth({ company, t }: { company: CompanyFundamentals; t: Dash
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * 6. AI 점수 위젯
+ * 6. AI 점수 위젯 (v2 — 시장 국면 감지 + 동적 가중치 + 백테스팅 배지)
  * ═══════════════════════════════════════════════════════════════ */
-function AIScoreWidget({ company, params, chartData, t }: {
+
+/** 시장 국면 → 배지 Tailwind 스타일 */
+function regimeBadgeStyle(regime: MarketRegime): string {
+  return regime === 'bull'
+    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+    : regime === 'bear'
+    ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+    : 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+}
+
+/** 예측 적중률 → 배지 Tailwind 스타일 */
+function hitRateBadgeStyle(hitRate: number): string {
+  return hitRate >= 65
+    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+    : hitRate >= 50
+    ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+    : 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+}
+
+function AIScoreWidget({ company, params, chartData, stockData, t }: {
   company: CompanyFundamentals;
   params: DCFUserParams;
   chartData: MockDataResult;
+  stockData: StockData;
   t: DashboardT;
 }) {
+  /* ── 기존 AI Score (DCF + RSI + MA + 밸류에이션) ── */
   const aiScore = useMemo(() => {
     const hybrid = calculateHybridValuation({
       fcf:               company.fcf,
@@ -956,26 +979,98 @@ function AIScoreWidget({ company, params, chartData, t }: {
     });
   }, [company, params, chartData]);
 
+  /* ── Piotroski & PEG (동적 점수·백테스팅 공통 입력) ── */
+  const piotroskiRaw = useMemo(() => calculatePiotroski({
+    returnOnAssets:    stockData.returnOnAssets,
+    operatingCashflow: stockData.operatingCashflow,
+    netIncome:         stockData.netIncome,
+    fcf:               stockData.fcf,
+    grossMargin:       stockData.grossMargin,
+    debtToEquity:      stockData.debtToEquity,
+    currentRatio:      stockData.currentRatio,
+    operatingMargin:   stockData.operatingMargin,
+    roe:               stockData.roe,
+    netMargin:         stockData.netMargin,
+  }).score, [stockData]);
+
+  const pegResult = useMemo(() =>
+    calculatePegScore(stockData.per, stockData.earningsGrowth, stockData.pegRatio),
+    [stockData.per, stockData.earningsGrowth, stockData.pegRatio],
+  );
+
+  /* ── MA 교차 신호 (재사용) ── */
+  const crossSignal = useMemo(() => detectMACross(
+    chartData.chartRows.map(r => r.sma20),
+    chartData.chartRows.map(r => r.sma60),
+    10,
+  ), [chartData]);
+
+  /* ── 동적 가중치 스코어 ── */
+  const dynResult: DynamicScoreResult = useMemo(() => calcDynamicWeightedScore({
+    piotroskiRaw,
+    pegResult,
+    rsi:         chartData.latestRSI,
+    crossSignal,
+    allPrices:   chartData.allPrices,
+  }), [piotroskiRaw, pegResult, chartData, crossSignal]);
+
+  /* ── 백테스팅 결과 ── */
+  const btResult: BacktestResult = useMemo(() => runBacktest({
+    chartRows:    chartData.chartRows,
+    allPrices:    chartData.allPrices,
+    piotroskiRaw,
+    pegResult,
+  }), [chartData, piotroskiRaw, pegResult]);
+
+  /* ── 렌더 유틸 ── */
   const gradeT    = t.aiGrades[aiScore.grade]      ?? aiScore.grade;
   const feedbackT = t.aiFeedbacks[aiScore.feedback] ?? aiScore.feedback;
 
-  const radius = 54;
-  const circ   = 2 * Math.PI * radius;
-  const dash   = (aiScore.score / 100) * circ;
+  const radius     = 54;
+  const circ       = 2 * Math.PI * radius;
+  const dash       = (aiScore.score / 100) * circ;
   const scoreColor = aiScore.score >= 65 ? '#10b981' : aiScore.score >= 45 ? '#f59e0b' : '#ef4444';
+
+  const regimeLabel =
+    dynResult.regime === 'bull' ? t.regimeBull :
+    dynResult.regime === 'bear' ? t.regimeBear : t.regimeSideways;
+
+  const dynGradeT = t.dynGrades[dynResult.grade] ?? dynResult.grade;
+  const wtPct = (w: number) => `${Math.round(w * 100)}%`;
 
   return (
     <div className="bg-[#0d1929] border border-gray-800/80 rounded-2xl p-4 sm:p-6">
-      <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2 mb-4 sm:mb-5">
-        <Zap className="w-4 h-4 text-yellow-400" />
-        {t.aiTitle}
-        <span className="ml-auto text-[10px] text-gray-600 flex items-center gap-1">
+
+      {/* ── 헤더: 타이틀 + 배지 2종 ── */}
+      <div className="flex flex-wrap items-center gap-2 mb-4 sm:mb-5">
+        <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2 mr-auto">
+          <Zap className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+          {t.aiTitle}
+        </h3>
+
+        {/* 시장 국면 배지 */}
+        <span className={cn(
+          'text-[10px] sm:text-xs font-bold px-2 py-1 rounded-full border flex-shrink-0',
+          regimeBadgeStyle(dynResult.regime),
+        )}>
+          {t.regimeLabel}: {regimeLabel}
+        </span>
+
+        {/* 예측 적중률 배지 */}
+        <span className={cn(
+          'text-[10px] sm:text-xs font-bold px-2 py-1 rounded-full border flex-shrink-0',
+          hitRateBadgeStyle(btResult.hitRate),
+        )}>
+          {t.backtestBadge}: {btResult.hitRate.toFixed(1)}%
+        </span>
+
+        <span className="text-[10px] text-gray-600 flex items-center gap-1 flex-shrink-0">
           <Info className="w-3 h-3" /> {t.aiSubLabel}
         </span>
-      </h3>
+      </div>
 
+      {/* ── 원형 게이지 + 등급 + 피드백 ── */}
       <div className="flex flex-col sm:flex-row gap-5 sm:gap-6 items-center">
-        {/* 원형 점수 게이지 */}
         <div className="relative flex-shrink-0">
           <svg width="130" height="130" className="-rotate-90 sm:w-[140px] sm:h-[140px]">
             <circle cx="65" cy="65" r={radius} fill="none" stroke="#1f2937" strokeWidth="10" />
@@ -994,9 +1089,18 @@ function AIScoreWidget({ company, params, chartData, t }: {
           <div className="bg-gray-800/50 rounded-xl p-3 text-xs text-gray-300 leading-relaxed border border-gray-700/50">
             💡 {feedbackT}
           </div>
+          {/* 백테스팅 메타 텍스트 */}
+          <p className="text-[10px] text-gray-600 mt-2 leading-relaxed">
+            📊 {t.backtestPeriod} · {btResult.lookbackDays}{t.backtestDays}
+            {btResult.totalSignals > 0
+              ? ` · ${btResult.totalSignals}${t.backtestSignalsSuffix}`
+              : ` · ${t.backtestNoSignals}`
+            }
+          </p>
         </div>
       </div>
 
+      {/* ── 기존 4개 브레이크다운 바 ── */}
       <div className="mt-4 sm:mt-5 space-y-3">
         {aiScore.breakdown.map(item => {
           const pct    = (item.points / item.maxPoints) * 100;
@@ -1018,6 +1122,107 @@ function AIScoreWidget({ company, params, chartData, t }: {
             </div>
           );
         })}
+      </div>
+
+      {/* ══ 구분선 ══ */}
+      <div className="flex items-center gap-2 mt-5 mb-4">
+        <div className="flex-1 h-px bg-gray-800" />
+        <span className="text-[10px] text-gray-600 font-bold uppercase tracking-widest whitespace-nowrap">
+          {t.dynamicScoreTitle}
+        </span>
+        <div className="flex-1 h-px bg-gray-800" />
+      </div>
+
+      {/* ── 국면 조정 종합 점수 섹션 ── */}
+      <div className="bg-gray-900/40 border border-gray-800/50 rounded-2xl p-3 sm:p-4 space-y-3">
+
+        {/* 국면 + 점수 헤더 */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider">{t.dynamicScoreSub}</p>
+            <p className={cn('text-lg sm:text-xl font-black mt-0.5', dynResult.gradeColor)}>
+              {dynGradeT}
+            </p>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="text-[10px] text-gray-600">Score</p>
+            <p className={cn('text-2xl font-black', dynResult.gradeColor)}>{dynResult.total}</p>
+            <p className="text-[10px] text-gray-700">/ 100</p>
+          </div>
+        </div>
+
+        {/* 가중치 적용 3개 컴포넌트 바 */}
+        <div className="space-y-2.5 pt-2 border-t border-gray-800/40">
+          <p className="text-[10px] text-gray-600 font-semibold uppercase tracking-wider">
+            {t.dynamicWeightsLabel}
+          </p>
+
+          {([
+            {
+              label: t.weightFinancial,
+              score: dynResult.financialScore,
+              weight: dynResult.weights.financial,
+              color: 'bg-blue-500',
+            },
+            {
+              label: t.weightGrowth,
+              score: dynResult.growthScore,
+              weight: dynResult.weights.growth,
+              color: 'bg-emerald-500',
+            },
+            {
+              label: t.weightTechnical,
+              score: dynResult.techScore,
+              weight: dynResult.weights.technical,
+              color: 'bg-violet-500',
+            },
+          ] as const).map(({ label, score, weight, color }) => (
+            <div key={label}>
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <span className="text-xs font-semibold text-gray-300 flex-1 min-w-0 truncate">
+                  {label}
+                </span>
+                <span className="text-[10px] text-gray-500 flex-shrink-0">
+                  {wtPct(weight)}
+                </span>
+                <span className="text-xs font-bold text-gray-200 flex-shrink-0 w-10 text-right">
+                  {score.toFixed(0)}
+                </span>
+              </div>
+              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                <div className={cn('h-full rounded-full transition-all duration-700', color)}
+                  style={{ width: `${score}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* 백테스팅 요약 */}
+        {btResult.totalSignals > 0 && (
+          <div className="flex items-center gap-3 pt-2 border-t border-gray-800/40 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className={cn(
+                'text-xs font-bold px-2 py-0.5 rounded-full border',
+                hitRateBadgeStyle(btResult.hitRate),
+              )}>
+                {btResult.hitRate.toFixed(1)}%
+              </span>
+              <span className="text-[10px] text-gray-500">{t.backtestBadge}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className={cn(
+                'text-xs font-bold',
+                btResult.avgReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400',
+              )}>
+                {btResult.avgReturnPct >= 0 ? '+' : ''}{btResult.avgReturnPct.toFixed(1)}%
+              </span>
+              <span className="text-[10px] text-gray-500">{t.backtestAvgReturn}</span>
+            </div>
+            <span className="text-[10px] text-gray-700 ml-auto">
+              ({btResult.correctSignals}/{btResult.totalSignals})
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1702,7 +1907,7 @@ export default function StockDashboard() {
             </div>
 
             <SectionDivider label={t.secAI} />
-            <AIScoreWidget company={company} params={dcfParams} chartData={chartData} t={t} />
+            <AIScoreWidget company={company} params={dcfParams} chartData={chartData} stockData={stockData} t={t} />
           </div>
         )}
 
@@ -1710,7 +1915,7 @@ export default function StockDashboard() {
         {activeTab === 'technical' && (
           <div className="space-y-4 sm:space-y-5">
             <SectionDivider label={t.secAI} />
-            <AIScoreWidget company={company} params={dcfParams} chartData={chartData} t={t} />
+            <AIScoreWidget company={company} params={dcfParams} chartData={chartData} stockData={stockData} t={t} />
 
             <SectionDivider label={t.secPriceChart} />
             <PriceChart rows={displayChartRows} fmtPx={fmtPx} t={t} />

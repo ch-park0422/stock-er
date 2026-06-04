@@ -796,3 +796,282 @@ export function calculateMagicFormula(
     hasData,
   };
 }
+
+/* ══════════════════════════════════════════════════════════════
+ * QUANT ENGINE — 시장 국면 감지 · 동적 가중치 · 백테스팅
+ * ══════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────────────────────────
+ * 11. 시장 국면 감지 (Market Regime Detector)
+ *
+ * 알고리즘:
+ *   ① SMA50 기울기 = (SMA50_현재 - SMA50_10거래일전) / SMA50_10거래일전
+ *   ② 20일 변동성 = 일간수익률 표준편차
+ *   ③ Bull    : 기울기 > +1.5%  AND  종가 > SMA50  AND  변동성 ≤ 2.5%
+ *      Bear    : 기울기 < -1.5%  AND  종가 < SMA50
+ *      Sideways: 그 외 (기울기 불명확 또는 고변동성)
+ * ───────────────────────────────────────────── */
+export type MarketRegime = 'bull' | 'bear' | 'sideways';
+
+/**
+ * 국면별 최적 가중치 (재무건전성 / 성장성 / 기술적)
+ * - Bear    : 재무건전성 60% / 성장성 20% / 기술 20%  → 생존력 우선
+ * - Bull    : 성장성 50%    / 기술 35%   / 재무 15%  → 모멘텀 우선
+ * - Sideways: 1/3 균등 배분
+ */
+export interface RegimeWeights {
+  financial: number;   // Piotroski
+  growth:    number;   // PEG / Peter Lynch
+  technical: number;   // RSI + MA
+}
+
+const REGIME_WEIGHTS: Record<MarketRegime, RegimeWeights> = {
+  bear:     { financial: 0.60, growth: 0.20, technical: 0.20 },
+  bull:     { financial: 0.15, growth: 0.50, technical: 0.35 },
+  sideways: { financial: 0.33, growth: 0.33, technical: 0.34 },
+};
+
+export function detectMarketRegime(prices: number[]): MarketRegime {
+  const n = prices.length;
+  if (n < 60) return 'sideways';
+
+  // SMA50 현재 vs 10거래일 전
+  const sma50Now = prices.slice(-50).reduce((a, b) => a + b, 0) / 50;
+  const sma50Ago = prices.slice(n - 60, n - 10).reduce((a, b) => a + b, 0) / 50;
+  const slope    = sma50Ago > 0 ? (sma50Now - sma50Ago) / sma50Ago : 0;
+
+  // 20일 변동성 (일간수익률 표준편차)
+  const last21   = prices.slice(-21);
+  const returns  = last21.slice(1).map((p, i) => last21[i] > 0 ? (p - last21[i]) / last21[i] : 0);
+  const meanRet  = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((s, r) => s + (r - meanRet) ** 2, 0) / returns.length;
+  const vol      = Math.sqrt(variance);
+
+  const priceAboveSMA = prices[n - 1] > sma50Now;
+
+  if (vol > 0.025)                         return 'sideways'; // 고변동성 → 전환기
+  if (slope > 0.015 && priceAboveSMA)      return 'bull';
+  if (slope < -0.015 && !priceAboveSMA)    return 'bear';
+  return 'sideways';
+}
+
+/* ─────────────────────────────────────────────
+ * 12. 동적 가중치 스코어링
+ *     시장 국면에 따라 재무/성장/기술 가중치를 다르게 적용
+ * ───────────────────────────────────────────── */
+export type DynamicGrade = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell';
+
+export interface DynamicScoreResult {
+  /** 국면 조정 종합 점수 0–100 */
+  total:         number;
+  grade:         DynamicGrade;
+  gradeColor:    string;
+  regime:        MarketRegime;
+  weights:       RegimeWeights;
+  /** 개별 컴포넌트 점수 0–100 */
+  financialScore: number;
+  growthScore:    number;
+  techScore:      number;
+}
+
+export interface DynamicScoreInput {
+  /** calculatePiotroski 원시 F-Score 0–9 */
+  piotroskiRaw: number;
+  /** calculatePegScore 결과 */
+  pegResult: PegResult;
+  /** 최신 RSI (null 허용) */
+  rsi: number | null;
+  /** MA 교차 신호 */
+  crossSignal: CrossSignal;
+  /** 전체 종가 배열 (detectMarketRegime 용) */
+  allPrices: number[];
+}
+
+/** PEG 티어 → 0–100 성장성 점수 정규화 */
+function normalizePegToScore(pegResult: PegResult): number {
+  if (!pegResult.hasData) return 50;
+  switch (pegResult.tier) {
+    case 'strong_buy':  return 100;
+    case 'buy':         return 75;
+    case 'fair':        return 50;
+    case 'overvalued':  return 20;
+    default:            return 50;
+  }
+}
+
+/** RSI + MA 교차 → 0–100 기술적 점수 */
+function calcTechScore(rsi: number | null, crossSignal: CrossSignal): number {
+  // RSI 기여 (0–50점): 과매도일수록 고점
+  const rsiVal = rsi ?? 50;
+  const rsiPts =
+    rsiVal <= 30 ? 50 :
+    rsiVal <= 40 ? 38 :
+    rsiVal <= 50 ? 28 :
+    rsiVal <= 60 ? 18 :
+    rsiVal <= 70 ? 8  : 0;
+
+  // MA 교차 기여 (0–50점)
+  const maPts: Record<CrossSignal, number> = {
+    golden: 50, uptrend: 38, neutral: 24, downtrend: 10, dead: 0,
+  };
+
+  return Math.min(100, rsiPts + maPts[crossSignal]);
+}
+
+/**
+ * 동적 가중치 스코어링 엔진
+ *
+ *   Bear  → 재무건전성(Piotroski) 60%, 성장성(PEG) 20%, 기술 20%
+ *   Bull  → 성장성(PEG) 50%, 기술(RSI+MA) 35%, 재무건전성 15%
+ *   Side  → 균등 33%씩
+ */
+export function calcDynamicWeightedScore(input: DynamicScoreInput): DynamicScoreResult {
+  const { piotroskiRaw, pegResult, rsi, crossSignal, allPrices } = input;
+
+  const regime  = detectMarketRegime(allPrices);
+  const weights = REGIME_WEIGHTS[regime];
+
+  const financialScore = Math.min(100, Math.max(0, (piotroskiRaw / 9) * 100));
+  const growthScore    = normalizePegToScore(pegResult);
+  const techScore      = calcTechScore(rsi, crossSignal);
+
+  const total = Math.round(
+    financialScore * weights.financial +
+    growthScore    * weights.growth    +
+    techScore      * weights.technical,
+  );
+
+  const grade: DynamicGrade =
+    total >= 80 ? 'strong_buy' :
+    total >= 65 ? 'buy' :
+    total >= 45 ? 'neutral' :
+    total >= 30 ? 'sell' : 'strong_sell';
+
+  const gradeColor =
+    grade === 'strong_buy' ? 'text-emerald-400' :
+    grade === 'buy'        ? 'text-green-400'   :
+    grade === 'neutral'    ? 'text-amber-400'   :
+    grade === 'sell'       ? 'text-orange-400'  : 'text-rose-500';
+
+  return { total, grade, gradeColor, regime, weights, financialScore, growthScore, techScore };
+}
+
+/* ─────────────────────────────────────────────
+ * 13. 백테스팅 엔진 (90일 가상 시뮬레이션)
+ *
+ * 알고리즘:
+ *   ① chartRows[n−90 .. n−31] 구간(시그널 탐색 윈도우)을 순회
+ *   ② 각 시점에서 동적 스코어 계산 → ≥ 60점이면 '매수 시그널' 기록
+ *   ③ 각 시그널로부터 30 거래일 후 종가 비교 → 수익이면 '적중'
+ *   ④ 적중률 = 적중 수 / 전체 시그널 수 × 100
+ *
+ * 주의: 기업 펀더멘탈(Piotroski, PEG)은 과거·현재 동일 값 사용.
+ *       연간 재무 데이터의 느린 변화를 반영한 현실적 근사값입니다.
+ * ───────────────────────────────────────────── */
+
+/** 백테스팅 엔진이 필요로 하는 차트 행 최소 인터페이스
+ *  (mockData.ts ChartRow의 순환 참조를 피하기 위해 로컬 덕타입 정의)
+ */
+interface BacktestBar {
+  close:  number;
+  rsi:    number | null;
+  sma20:  number | null;
+  sma60:  number | null;
+}
+
+export interface BacktestResult {
+  /** 예측 적중률 % (0–100) */
+  hitRate:         number;
+  /** 탐색 윈도우 내 시그널 총 횟수 */
+  totalSignals:    number;
+  /** 그 중 수익 발생 횟수 (적중) */
+  correctSignals:  number;
+  /** 시그널 발동 후 평균 수익률 % */
+  avgReturnPct:    number;
+  /** 현재 시장 국면 */
+  regime:          MarketRegime;
+  /** 실제 사용한 회고 기간 (거래일) */
+  lookbackDays:    number;
+}
+
+export interface BacktestInput {
+  chartRows:    BacktestBar[];
+  allPrices:    number[];
+  piotroskiRaw: number;      // 0–9
+  pegResult:    PegResult;
+}
+
+export function runBacktest(input: BacktestInput): BacktestResult {
+  const { chartRows, allPrices, piotroskiRaw, pegResult } = input;
+
+  const n             = chartRows.length;
+  const HOLDING       = 30;                             // 보유 기간 (거래일)
+  const LOOKBACK      = Math.min(90, n);
+  const signalStart   = Math.max(0, n - LOOKBACK);
+  const signalEnd     = Math.max(0, n - HOLDING - 1);  // 미래 데이터 확보용
+
+  const signals: Array<{ idx: number; entryPrice: number }> = [];
+
+  for (let i = signalStart; i <= signalEnd; i++) {
+    const row  = chartRows[i];
+    const prev = chartRows[i - 1];
+
+    // MA 추세 판단 (pre-calculated SMA20/SMA60 직접 활용)
+    const sma20 = row.sma20  ?? 0;
+    const sma60 = row.sma60  ?? 0;
+    const pSma20 = prev?.sma20 ?? sma20;
+    const pSma60 = prev?.sma60 ?? sma60;
+
+    let cross: CrossSignal = 'neutral';
+    if      (pSma20 <= pSma60 && sma20 > sma60) cross = 'golden';
+    else if (pSma20 >= pSma60 && sma20 < sma60) cross = 'dead';
+    else if (sma20 > sma60)                      cross = 'uptrend';
+    else if (sma20 < sma60)                      cross = 'downtrend';
+
+    // 해당 시점까지의 종가로 국면 감지
+    const pricesUpTo = allPrices.slice(0, i + 1);
+    const regime     = detectMarketRegime(pricesUpTo);
+    const weights    = REGIME_WEIGHTS[regime];
+
+    const fScore = Math.min(100, (piotroskiRaw / 9) * 100);
+    const gScore = normalizePegToScore(pegResult);
+    const tScore = calcTechScore(row.rsi, cross);
+
+    const dynScore = Math.round(
+      fScore * weights.financial +
+      gScore * weights.growth    +
+      tScore * weights.technical,
+    );
+
+    if (dynScore >= 60) {
+      signals.push({ idx: i, entryPrice: row.close });
+    }
+  }
+
+  if (signals.length === 0) {
+    return {
+      hitRate: 50.0, totalSignals: 0, correctSignals: 0,
+      avgReturnPct: 0, regime: detectMarketRegime(allPrices), lookbackDays: LOOKBACK,
+    };
+  }
+
+  let hits = 0;
+  let totalRet = 0;
+
+  for (const sig of signals) {
+    const exitIdx   = Math.min(sig.idx + HOLDING, n - 1);
+    const exitPrice = chartRows[exitIdx].close;
+    const ret       = sig.entryPrice > 0 ? (exitPrice - sig.entryPrice) / sig.entryPrice : 0;
+    if (exitPrice > sig.entryPrice) hits++;
+    totalRet += ret;
+  }
+
+  return {
+    hitRate:        Math.round((hits / signals.length) * 1000) / 10,   // 소수점 1자리
+    totalSignals:   signals.length,
+    correctSignals: hits,
+    avgReturnPct:   Math.round((totalRet / signals.length) * 1000) / 10,
+    regime:         detectMarketRegime(allPrices),
+    lookbackDays:   LOOKBACK,
+  };
+}
