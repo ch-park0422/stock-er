@@ -1,16 +1,19 @@
 'use client';
 
 /**
- * app/crypto/page.tsx
+ * app/crypto/page.tsx  v2
  * 가상화폐 분석 대시보드
  *
+ * · 종합 투자 의견 (Crypto Sentiment AI) — 0~100점, 5단계 배지
  * · 온체인 지표 근사치: NVT 비율 / MVRV Z-스코어 / 퓨엘 멀티플
  * · 기술적 차트: 가격 + EMA 20/50/200 리본 + Stochastic RSI
- * · KO / EN 다국어 토글
+ * · 분석 방법론 안내 섹션 (Methodology Card)
+ * · 크립토 전용 강력 면책조항
+ * · KO / EN 다국어 토글 (localStorage 공유)
  * · 모바일 반응형
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   ComposedChart, Line, Area,
@@ -19,7 +22,7 @@ import {
 } from 'recharts';
 import {
   Search, RefreshCw, Globe, ArrowUpRight, ArrowDownRight,
-  TrendingUp, BarChart2, ServerCrash, Activity,
+  TrendingUp, BarChart2, ServerCrash, Activity, BookOpen,
 } from 'lucide-react';
 
 import type { CryptoData, CryptoChartRow, CryptoMetric } from '@/lib/types';
@@ -52,10 +55,87 @@ function fmtAxis(v: number): string {
 }
 
 /* ─────────────────────────────────────────────
+ * 종합 투자 의견 (Sentiment) 로직
+ * ───────────────────────────────────────────── */
+type SentimentGrade = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell';
+
+interface BreakdownItem {
+  key: 'nvt' | 'mvrv' | 'puell' | 'stoch';
+  score: number;
+  maxScore: number;
+  signal: string;      // on-chain signal key or stoch tier key
+  barPct: number;      // 0-100
+}
+
+interface SentimentResult {
+  score: number;       // 0-100
+  grade: SentimentGrade;
+  breakdown: BreakdownItem[];
+}
+
+/** 온체인 signal → 점수 (각 최대 25점) */
+function onChainPts(signal: CryptoMetric['signal']): number {
+  return signal === 'cold' ? 25 : signal === 'normal' ? 20 : signal === 'caution' ? 8 : 0;
+}
+
+/** Stoch %K → 티어 키 */
+function stochTierKey(k: number | null): string {
+  if (k === null) return 'normal';
+  if (k <= 20) return 'cold';
+  if (k <= 40) return 'low';
+  if (k <= 60) return 'normal';
+  if (k <= 80) return 'caution';
+  return 'hot';
+}
+
+function calcCryptoSentiment(data: CryptoData): SentimentResult {
+  const nvtPts   = onChainPts(data.nvt.signal);
+  const mvrvPts  = onChainPts(data.mvrv.signal);
+  const puellPts = onChainPts(data.puell.signal);
+
+  const k = data.latestStochK ?? 50;
+  const stochPts = k <= 20 ? 25 : k <= 40 ? 20 : k <= 60 ? 15 : k <= 80 ? 5 : 0;
+
+  const total = nvtPts + mvrvPts + puellPts + stochPts;
+  const grade: SentimentGrade =
+    total >= 80 ? 'strong_buy' :
+    total >= 60 ? 'buy' :
+    total >= 40 ? 'neutral' :
+    total >= 20 ? 'sell' : 'strong_sell';
+
+  return {
+    score: total,
+    grade,
+    breakdown: [
+      { key: 'nvt',   score: nvtPts,   maxScore: 25, signal: data.nvt.signal,   barPct: (nvtPts / 25) * 100 },
+      { key: 'mvrv',  score: mvrvPts,  maxScore: 25, signal: data.mvrv.signal,  barPct: (mvrvPts / 25) * 100 },
+      { key: 'puell', score: puellPts, maxScore: 25, signal: data.puell.signal, barPct: (puellPts / 25) * 100 },
+      { key: 'stoch', score: stochPts, maxScore: 25, signal: stochTierKey(data.latestStochK), barPct: (stochPts / 25) * 100 },
+    ],
+  };
+}
+
+/* ─────────────────────────────────────────────
+ * Grade 스타일 맵
+ * ───────────────────────────────────────────── */
+const GRADE_STYLE: Record<SentimentGrade, {
+  bg: string; border: string; text: string; glow: string; gauge: string;
+}> = {
+  strong_buy:  { bg: 'bg-emerald-500/10', border: 'border-emerald-500/40', text: 'text-emerald-400', glow: 'shadow-emerald-500/10', gauge: '#10b981' },
+  buy:         { bg: 'bg-green-500/10',   border: 'border-green-500/40',   text: 'text-green-400',   glow: 'shadow-green-500/10',   gauge: '#22c55e' },
+  neutral:     { bg: 'bg-amber-500/10',   border: 'border-amber-500/40',   text: 'text-amber-400',   glow: 'shadow-amber-500/10',   gauge: '#f59e0b' },
+  sell:        { bg: 'bg-orange-500/10',  border: 'border-orange-500/40',  text: 'text-orange-400',  glow: 'shadow-orange-500/10',  gauge: '#f97316' },
+  strong_sell: { bg: 'bg-rose-500/10',    border: 'border-rose-500/40',    text: 'text-rose-400',    glow: 'shadow-rose-500/10',    gauge: '#ef4444' },
+};
+
+/* ─────────────────────────────────────────────
  * 차트 툴팁
  * ───────────────────────────────────────────── */
 function CryptoPriceTooltip({ active, payload, label, t }: {
-  active?: boolean; payload?: { dataKey: string; value: number }[]; label?: string; t: CryptoT;
+  active?: boolean;
+  payload?: { dataKey: string; value: number }[];
+  label?: string;
+  t: CryptoT;
 }) {
   if (!active || !payload?.length) return null;
   const get = (k: string) => payload.find(p => p.dataKey === k)?.value;
@@ -68,7 +148,12 @@ function CryptoPriceTooltip({ active, payload, label, t }: {
       <p className="text-gray-400 mb-2 font-semibold">{label}</p>
       <div className="space-y-1">
         {close  != null && <div className="flex justify-between gap-4"><span className="text-gray-500">{t.close}</span><span className="text-violet-400 font-bold">{fmtPrice(close)}</span></div>}
-        {ema20  != null && <div className="flex justify-between gap-4 pt-1 border-t border-gray-800"><span className="text-cyan-500/80">{t.ema20Label}</span><span className="text-cyan-400">{fmtPrice(ema20)}</span></div>}
+        {ema20  != null && (
+          <div className="flex justify-between gap-4 pt-1 border-t border-gray-800">
+            <span className="text-cyan-500/80">{t.ema20Label}</span>
+            <span className="text-cyan-400">{fmtPrice(ema20)}</span>
+          </div>
+        )}
         {ema50  != null && <div className="flex justify-between gap-4"><span className="text-amber-500/80">{t.ema50Label}</span><span className="text-amber-400">{fmtPrice(ema50)}</span></div>}
         {ema200 != null && <div className="flex justify-between gap-4"><span className="text-rose-500/80">{t.ema200Label}</span><span className="text-rose-400">{fmtPrice(ema200)}</span></div>}
       </div>
@@ -77,7 +162,10 @@ function CryptoPriceTooltip({ active, payload, label, t }: {
 }
 
 function StochTooltip({ active, payload, label, t }: {
-  active?: boolean; payload?: { dataKey: string; value: number }[]; label?: string; t: CryptoT;
+  active?: boolean;
+  payload?: { dataKey: string; value: number }[];
+  label?: string;
+  t: CryptoT;
 }) {
   if (!active || !payload?.length) return null;
   const k = payload.find(p => p.dataKey === 'stochK')?.value;
@@ -86,7 +174,7 @@ function StochTooltip({ active, payload, label, t }: {
     v == null ? null
     : v >= 80 ? { text: t.overbought, c: 'text-rose-400' }
     : v <= 20 ? { text: t.oversold,   c: 'text-cyan-400' }
-    : { text: t.neutralZone, c: 'text-gray-400' };
+    :           { text: t.neutralZone, c: 'text-gray-400' };
   const zk = zone(k);
   return (
     <div className="bg-gray-950 border border-violet-900/50 rounded-xl p-3 text-xs shadow-2xl">
@@ -100,9 +188,112 @@ function StochTooltip({ active, payload, label, t }: {
   );
 }
 
-/* ─────────────────────────────────────────────
- * 온체인 카드
- * ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+ * 1. 종합 투자 의견 카드 (Crypto Sentiment AI)
+ * ═══════════════════════════════════════════════════════════════ */
+function CryptoSentimentCard({ data, t }: { data: CryptoData; t: CryptoT }) {
+  const sentiment = useMemo(() => calcCryptoSentiment(data), [data]);
+  const gs = GRADE_STYLE[sentiment.grade];
+  const gradeLabel   = t.sentimentGrades[sentiment.grade]   ?? sentiment.grade;
+  const feedbackText = t.sentimentFeedbacks[sentiment.grade] ?? '';
+
+  // SVG 원형 게이지
+  const radius = 52;
+  const circ   = 2 * Math.PI * radius;
+  const dash   = (sentiment.score / 100) * circ;
+
+  return (
+    <div className={cn(
+      'rounded-2xl p-4 sm:p-6 border shadow-lg',
+      gs.bg, gs.border, gs.glow,
+    )}>
+      {/* 헤더 */}
+      <div className="flex items-center gap-2.5 mb-4 sm:mb-5">
+        <span className="text-xl">🧠</span>
+        <div>
+          <h2 className="text-white font-bold text-sm sm:text-base">{t.sentimentTitle}</h2>
+          <p className="text-xs text-gray-500 mt-0.5">{t.sentimentSub}</p>
+        </div>
+      </div>
+
+      {/* 점수 + 의견 + 피드백 */}
+      <div className="flex flex-col sm:flex-row gap-5 sm:gap-6 items-center mb-5">
+        {/* 원형 게이지 */}
+        <div className="relative flex-shrink-0">
+          <svg width="120" height="120" className="-rotate-90">
+            <circle cx="60" cy="60" r={radius} fill="none" stroke="#1f2937" strokeWidth="9" />
+            <circle
+              cx="60" cy="60" r={radius} fill="none"
+              stroke={gs.gauge} strokeWidth="9"
+              strokeDasharray={`${dash} ${circ - dash}`}
+              strokeLinecap="round"
+              style={{ transition: 'stroke-dasharray 0.8s ease, stroke 0.4s ease' }}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className={cn('text-3xl font-black leading-none', gs.text)}>{sentiment.score}</span>
+            <span className="text-[11px] text-gray-500 mt-0.5">/ 100</span>
+          </div>
+        </div>
+
+        {/* 등급 + 피드백 */}
+        <div className="flex-1 min-w-0 w-full">
+          <p className={cn('text-xl sm:text-2xl font-extrabold mb-2.5', gs.text)}>{gradeLabel}</p>
+          <div className={cn(
+            'rounded-xl p-3 text-xs text-gray-300 leading-relaxed border',
+            gs.bg, gs.border,
+          )}>
+            💡 {feedbackText}
+          </div>
+        </div>
+      </div>
+
+      {/* 지표별 점수 막대 */}
+      <div className="space-y-3 border-t border-gray-800 pt-4">
+        {sentiment.breakdown.map(item => {
+          // reason 텍스트 조회
+          let reason = '';
+          if (item.key === 'nvt')   reason = t.nvtReasons[item.signal]   ?? item.signal;
+          if (item.key === 'mvrv')  reason = t.mvrvReasons[item.signal]  ?? item.signal;
+          if (item.key === 'puell') reason = t.puellReasons[item.signal] ?? item.signal;
+          if (item.key === 'stoch') reason = t.stochReasons[item.signal] ?? item.signal;
+
+          const barColor = item.score >= 20 ? 'bg-emerald-500' : item.score >= 10 ? 'bg-amber-500' : 'bg-rose-500';
+
+          return (
+            <div key={item.key}>
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs font-semibold text-gray-300">
+                  {t.sentimentBreakdown[item.key] ?? item.key}
+                </span>
+                <span className="text-xs font-bold text-gray-200">
+                  {item.score}
+                  <span className="text-gray-600 font-normal"> / {item.maxScore}</span>
+                </span>
+              </div>
+              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden mb-1">
+                <div
+                  className={cn('h-full rounded-full transition-all duration-700', barColor)}
+                  style={{ width: `${item.barPct}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-gray-600 leading-relaxed">{reason}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 주석 */}
+      <p className="text-[10px] text-gray-700 mt-3 pt-3 border-t border-gray-800">
+        {t.sentimentNote}
+      </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * 2. 온체인 지표 카드
+ * ═══════════════════════════════════════════════════════════════ */
 const SIGNAL_STYLE: Record<CryptoMetric['signal'], {
   bg: string; border: string; text: string; glow: string;
 }> = {
@@ -127,8 +318,8 @@ function OnChainCard({
   const s = SIGNAL_STYLE[metric.signal];
   return (
     <div className={cn(
-      'bg-[#0a0f1e] border rounded-2xl p-4 sm:p-5 flex flex-col gap-3 transition-shadow',
-      s.border, `shadow-lg ${s.glow}`,
+      'bg-[#0a0f1e] border rounded-2xl p-4 sm:p-5 flex flex-col gap-3 shadow-lg transition-shadow',
+      s.border, s.glow,
     )}>
       {/* 헤더 */}
       <div className="flex items-start justify-between gap-2">
@@ -137,7 +328,7 @@ function OnChainCard({
             <span className="text-xl">{emoji}</span>
             <h3 className="text-white font-bold text-sm">{title}</h3>
           </div>
-          <p className="text-[10px] text-gray-600 mt-0.5">{fullName}</p>
+          <p className="text-[10px] text-gray-600 mt-0.5 ml-7">{fullName}</p>
         </div>
         <span className={cn(
           'flex-shrink-0 text-[10px] font-bold px-2 py-1 rounded-full border',
@@ -157,8 +348,10 @@ function OnChainCard({
 
       {/* 인디케이터 바 */}
       <div className="space-y-2">
-        <div className="relative h-3 rounded-full overflow-hidden"
-          style={{ background: 'linear-gradient(to right, #22d3ee, #10b981, #f59e0b, #ef4444)' }}>
+        <div
+          className="relative h-3 rounded-full overflow-hidden"
+          style={{ background: 'linear-gradient(to right, #22d3ee, #10b981, #f59e0b, #ef4444)' }}
+        >
           {/* 마커 */}
           <div
             className="absolute top-1/2 -translate-y-1/2 w-2.5 h-4 bg-white rounded shadow-lg"
@@ -182,9 +375,9 @@ function OnChainCard({
   );
 }
 
-/* ─────────────────────────────────────────────
- * 가격 + EMA 리본 차트
- * ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+ * 3. 가격 + EMA 리본 차트
+ * ═══════════════════════════════════════════════════════════════ */
 function CryptoPriceChart({ rows, t }: { rows: CryptoChartRow[]; t: CryptoT }) {
   const legend = [
     { color: 'bg-violet-400', label: t.close },
@@ -221,33 +414,30 @@ function CryptoPriceChart({ rows, t }: { rows: CryptoChartRow[]; t: CryptoT }) {
           <Tooltip content={<CryptoPriceTooltip t={t} />} />
           <Area type="monotone" dataKey="close" fill="url(#cryptoPriceGrad)"
             stroke="#7c3aed" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="ema20"  stroke="#22d3ee"
-            strokeWidth={1.5} dot={false} connectNulls />
-          <Line type="monotone" dataKey="ema50"  stroke="#f59e0b"
-            strokeWidth={1.5} dot={false} connectNulls />
-          <Line type="monotone" dataKey="ema200" stroke="#f87171"
-            strokeWidth={1.5} dot={false} connectNulls />
+          <Line type="monotone" dataKey="ema20"  stroke="#22d3ee" strokeWidth={1.5} dot={false} connectNulls />
+          <Line type="monotone" dataKey="ema50"  stroke="#f59e0b" strokeWidth={1.5} dot={false} connectNulls />
+          <Line type="monotone" dataKey="ema200" stroke="#f87171" strokeWidth={1.5} dot={false} connectNulls />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-/* ─────────────────────────────────────────────
- * Stochastic RSI 차트
- * ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+ * 4. Stochastic RSI 차트
+ * ═══════════════════════════════════════════════════════════════ */
 function StochRSIChart({ rows, latestK, latestD, t }: {
   rows: CryptoChartRow[];
   latestK: number | null;
   latestD: number | null;
   t: CryptoT;
 }) {
-  const kVal  = latestK ?? 50;
-  const zone  = kVal >= 80
-    ? { text: t.overbought, c: 'text-rose-400',  b: 'bg-rose-500/10',    bd: 'border-rose-500/30' }
+  const kVal = latestK ?? 50;
+  const zone = kVal >= 80
+    ? { text: t.overbought, c: 'text-rose-400',  b: 'bg-rose-500/10',  bd: 'border-rose-500/30' }
     : kVal <= 20
-    ? { text: t.oversold,   c: 'text-cyan-400',  b: 'bg-cyan-500/10',    bd: 'border-cyan-500/30' }
-    : { text: t.neutralZone, c: 'text-gray-300', b: 'bg-gray-700/30',    bd: 'border-gray-600/30' };
+    ? { text: t.oversold,   c: 'text-cyan-400',  b: 'bg-cyan-500/10',  bd: 'border-cyan-500/30' }
+    : { text: t.neutralZone, c: 'text-gray-300', b: 'bg-gray-700/30',  bd: 'border-gray-600/30' };
 
   return (
     <div className="bg-[#0a0f1e] border border-violet-900/30 rounded-2xl p-3 sm:p-5">
@@ -256,12 +446,12 @@ function StochRSIChart({ rows, latestK, latestD, t }: {
           {t.stochTitle}{' '}
           <span className="text-gray-500 font-normal text-xs sm:text-sm">{t.stochSub}</span>
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className={cn('text-xs font-bold px-2.5 py-1 rounded-full border', zone.b, zone.bd, zone.c)}>
             %K {kVal.toFixed(1)} · {zone.text}
           </div>
           {latestD != null && (
-            <div className="text-xs text-orange-400 font-semibold">
+            <div className="text-xs text-orange-400 font-semibold bg-orange-500/10 border border-orange-500/25 px-2.5 py-1 rounded-full">
               %D {latestD.toFixed(1)}
             </div>
           )}
@@ -294,7 +484,7 @@ function StochRSIChart({ rows, latestK, latestD, t }: {
           <ReferenceLine y={80} stroke="#ef4444" strokeDasharray="4 3" strokeOpacity={0.5}
             label={{ value: t.overbought, position: 'insideTopRight', fill: '#ef4444', fontSize: 9 }} />
           <ReferenceLine y={20} stroke="#22d3ee" strokeDasharray="4 3" strokeOpacity={0.5}
-            label={{ value: t.oversold,   position: 'insideBottomRight', fill: '#22d3ee', fontSize: 9 }} />
+            label={{ value: t.oversold, position: 'insideBottomRight', fill: '#22d3ee', fontSize: 9 }} />
           <ReferenceLine y={50} stroke="#374151" strokeDasharray="2 4" strokeOpacity={0.5} />
           <Line type="monotone" dataKey="stochK" stroke="#a78bfa"
             strokeWidth={2} dot={false} connectNulls name="%K" />
@@ -306,9 +496,9 @@ function StochRSIChart({ rows, latestK, latestD, t }: {
   );
 }
 
-/* ─────────────────────────────────────────────
- * 크립토 프로필 카드
- * ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+ * 5. 크립토 프로필 카드
+ * ═══════════════════════════════════════════════════════════════ */
 function CryptoProfileCard({
   data, onRefresh, isLoading, t,
 }: {
@@ -328,8 +518,8 @@ function CryptoProfileCard({
       <div className="flex flex-col md:flex-row md:items-start gap-4 sm:gap-6">
         {/* 코인 이름 & 티커 */}
         <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
-          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-violet-600/30 to-purple-800/30 border border-violet-700/30 flex items-center justify-center flex-shrink-0">
-            <span className="text-2xl">₿</span>
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-violet-600/30 to-purple-800/30 border border-violet-700/30 flex items-center justify-center flex-shrink-0 text-2xl">
+            ₿
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -392,13 +582,16 @@ function CryptoProfileCard({
       {/* 요약 지표 4개 */}
       <div className="mt-4 sm:mt-5 pt-4 sm:pt-5 border-t border-violet-900/20 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {([
-          { label: t.marketCap,  value: data.marketCap,  emoji: '🏦', accent: 'text-violet-400' },
-          { label: t.volume24h,  value: data.volume,     emoji: '📊', accent: 'text-cyan-400' },
-          { label: '52W High',   value: fmtPrice(data.week52High), emoji: '📈', accent: 'text-emerald-400' },
-          { label: '52W Low',    value: fmtPrice(data.week52Low),  emoji: '📉', accent: 'text-rose-400' },
+          { label: t.marketCap, value: data.marketCap,             emoji: '🏦', accent: 'text-violet-400' },
+          { label: t.volume24h, value: data.volume,                emoji: '📊', accent: 'text-cyan-400' },
+          { label: '52W High',  value: fmtPrice(data.week52High),  emoji: '📈', accent: 'text-emerald-400' },
+          { label: '52W Low',   value: fmtPrice(data.week52Low),   emoji: '📉', accent: 'text-rose-400' },
         ] as const).map(({ label, value, emoji, accent }) => (
           <div key={label} className="flex items-center gap-2 sm:gap-3">
-            <div className={cn('w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gray-800/60 flex items-center justify-center flex-shrink-0 text-base', accent)}>
+            <div className={cn(
+              'w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gray-800/60 flex items-center justify-center flex-shrink-0 text-base',
+              accent,
+            )}>
               {emoji}
             </div>
             <div className="min-w-0">
@@ -412,17 +605,17 @@ function CryptoProfileCard({
   );
 }
 
-/* ─────────────────────────────────────────────
- * 기술 지표 요약 배지 행
- * ───────────────────────────────────────────── */
-function TechSummaryRow({ data, t }: { data: CryptoData; t: CryptoT }) {
+/* ═══════════════════════════════════════════════════════════════
+ * 6. 기술 지표 요약 배지 행
+ * ═══════════════════════════════════════════════════════════════ */
+function TechSummaryRow({ data }: { data: CryptoData }) {
   const items = [
-    { label: 'RSI (14)',   value: data.latestRSI,    fmt: (v: number) => v.toFixed(1),   color: (v: number) => v >= 70 ? 'text-rose-400' : v <= 30 ? 'text-cyan-400' : 'text-gray-300' },
-    { label: 'EMA 20',    value: data.latestEMA20,   fmt: fmtPrice, color: (_v: number) => 'text-cyan-400' },
-    { label: 'EMA 50',    value: data.latestEMA50,   fmt: fmtPrice, color: (_v: number) => 'text-amber-400' },
-    { label: 'EMA 200',   value: data.latestEMA200,  fmt: fmtPrice, color: (_v: number) => 'text-rose-400' },
-    { label: 'Stoch %K',  value: data.latestStochK,  fmt: (v: number) => v.toFixed(1),   color: (v: number) => v >= 80 ? 'text-rose-400' : v <= 20 ? 'text-cyan-400' : 'text-violet-400' },
-    { label: 'Stoch %D',  value: data.latestStochD,  fmt: (v: number) => v.toFixed(1),   color: (_v: number) => 'text-orange-400' },
+    { label: 'RSI (14)',  value: data.latestRSI,    fmt: (v: number) => v.toFixed(1),   color: (v: number) => v >= 70 ? 'text-rose-400' : v <= 30 ? 'text-cyan-400' : 'text-gray-300' },
+    { label: 'EMA 20',   value: data.latestEMA20,   fmt: fmtPrice, color: (_v: number) => 'text-cyan-400' },
+    { label: 'EMA 50',   value: data.latestEMA50,   fmt: fmtPrice, color: (_v: number) => 'text-amber-400' },
+    { label: 'EMA 200',  value: data.latestEMA200,  fmt: fmtPrice, color: (_v: number) => 'text-rose-400' },
+    { label: 'Stoch %K', value: data.latestStochK,  fmt: (v: number) => v.toFixed(1),   color: (v: number) => v >= 80 ? 'text-rose-400' : v <= 20 ? 'text-cyan-400' : 'text-violet-400' },
+    { label: 'Stoch %D', value: data.latestStochD,  fmt: (v: number) => v.toFixed(1),   color: (_v: number) => 'text-orange-400' },
   ] as const;
 
   return (
@@ -440,9 +633,78 @@ function TechSummaryRow({ data, t }: { data: CryptoData; t: CryptoT }) {
   );
 }
 
-/* ─────────────────────────────────────────────
- * 로딩 & 에러 화면
- * ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+ * 7. 분석 방법론 안내 섹션
+ * ═══════════════════════════════════════════════════════════════ */
+function MethodologySection({ t }: { t: CryptoT }) {
+  return (
+    <div>
+      {/* 섹션 헤더 */}
+      <div className="flex items-center gap-3 mb-3">
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest whitespace-nowrap">
+          {t.methodologyTitle}
+        </p>
+        <div className="flex-1 h-px bg-gray-800" />
+        <BookOpen className="w-3.5 h-3.5 text-violet-700 flex-shrink-0" />
+      </div>
+      <p className="text-xs text-gray-600 mb-4 leading-relaxed">{t.methodologySub}</p>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+        {t.methodologies.map((m) => (
+          <div key={m.name}
+            className="bg-[#0a0f1e] border border-violet-900/20 rounded-2xl p-4 sm:p-5 flex flex-col gap-3">
+            {/* 지표 헤더 */}
+            <div>
+              <div className="flex items-center gap-2.5 mb-2">
+                <span className="text-2xl">{m.emoji}</span>
+                <div className="min-w-0">
+                  <h3 className="text-white font-bold text-sm leading-tight">{m.name}</h3>
+                  <p className="text-[10px] text-gray-600 leading-tight">{m.fullName}</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 rounded-full">
+                📌 {m.creator}
+              </span>
+            </div>
+
+            {/* 설명 */}
+            <p className="text-xs text-gray-400 leading-relaxed flex-1">{m.desc}</p>
+
+            {/* 근사 방법 */}
+            <div className="border-t border-gray-800/60 pt-2.5">
+              <p className="text-[10px] text-gray-600 leading-relaxed italic">{m.note}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * 8. 크립토 전용 강력 면책조항
+ * ═══════════════════════════════════════════════════════════════ */
+function CryptoDisclaimer({ t }: { t: CryptoT }) {
+  return (
+    <div className="rounded-2xl border border-orange-500/40 bg-gradient-to-br from-orange-950/40 to-rose-950/30 p-4 sm:p-6">
+      <div className="flex items-start gap-3">
+        <span className="text-xl sm:text-2xl flex-shrink-0 mt-0.5">⚠️</span>
+        <div className="min-w-0">
+          <h3 className="text-orange-300 font-bold text-sm sm:text-base mb-2 leading-tight">
+            {t.disclaimerTitle}
+          </h3>
+          <p className="text-orange-200/70 text-xs sm:text-sm leading-relaxed">
+            {t.disclaimerBody}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * 9. 로딩 & 에러 화면
+ * ═══════════════════════════════════════════════════════════════ */
 function LoadingScreen({ ticker, t }: { ticker: string; t: CryptoT }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-5 px-4"
@@ -495,9 +757,9 @@ function ErrorScreen({ ticker, message, onRetry, t }: {
   );
 }
 
-/* ─────────────────────────────────────────────
- * 메인 대시보드
- * ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+ * 10. 메인 대시보드
+ * ═══════════════════════════════════════════════════════════════ */
 export default function CryptoDashboard() {
   /* ── 언어 상태 ──────────────────────────────── */
   const [lang, setLang] = useState<Lang>('ko');
@@ -579,8 +841,8 @@ export default function CryptoDashboard() {
   );
 
   /* ── 화면 분기 ──────────────────────────────── */
-  if (!cryptoData && isLoading)  return <LoadingScreen ticker={lastTicker} t={t} />;
-  if (!cryptoData && apiError)   return (
+  if (!cryptoData && isLoading) return <LoadingScreen ticker={lastTicker} t={t} />;
+  if (!cryptoData && apiError)  return (
     <ErrorScreen ticker={lastTicker} message={apiError} onRetry={() => fetchData(lastTicker)} t={t} />
   );
 
@@ -655,7 +917,10 @@ export default function CryptoDashboard() {
       {cryptoData && (
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
 
-          {/* 프로필 카드 */}
+          {/* ❶ 종합 투자 의견 카드 */}
+          <CryptoSentimentCard data={cryptoData} t={t} />
+
+          {/* ❷ 프로필 카드 */}
           <CryptoProfileCard
             data={cryptoData}
             onRefresh={() => fetchData(cryptoData.ticker)}
@@ -663,10 +928,10 @@ export default function CryptoDashboard() {
             t={t}
           />
 
-          {/* 기술 지표 요약 배지 */}
-          <TechSummaryRow data={cryptoData} t={t} />
+          {/* ❸ 기술 지표 요약 배지 */}
+          <TechSummaryRow data={cryptoData} />
 
-          {/* ── 온체인 기본적 분석 ─────────────────── */}
+          {/* ❹ 온체인 기본적 분석 ─────────────────── */}
           <div>
             <div className="flex items-center gap-3 mb-3">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-widest whitespace-nowrap">
@@ -710,13 +975,12 @@ export default function CryptoDashboard() {
               />
             </div>
 
-            {/* 면책 노트 */}
             <p className="text-[10px] text-gray-700 mt-2 leading-relaxed">
               {t.onChainNote}
             </p>
           </div>
 
-          {/* ── 기술적 차트 ────────────────────────── */}
+          {/* ❺ 기술적 차트 ────────────────────────── */}
           <div>
             <div className="flex items-center gap-3 mb-3">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-widest whitespace-nowrap">
@@ -737,6 +1001,12 @@ export default function CryptoDashboard() {
             </div>
           </div>
 
+          {/* ❻ 분석 방법론 안내 ────────────────────── */}
+          <MethodologySection t={t} />
+
+          {/* ❼ 크립토 전용 면책조항 ─────────────────── */}
+          <CryptoDisclaimer t={t} />
+
         </main>
       )}
 
@@ -746,7 +1016,6 @@ export default function CryptoDashboard() {
         <p className="text-xs text-gray-700">
           Stock-er · {t.footerData} — {t.footerNote}
         </p>
-        <p className="text-[10px] text-gray-800 mt-1">{t.disclaimer}</p>
       </footer>
     </div>
   );

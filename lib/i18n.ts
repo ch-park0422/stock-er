@@ -792,6 +792,91 @@ const crypto = {
     neutralZone:     '중립',
     zone:            '구간',
 
+    /* ── 종합 투자 의견 (Sentiment AI) ─────────────────── */
+    sentimentTitle:      '크립토 종합 투자 의견',
+    sentimentSub:        '온체인 + 기술적 지표 종합 분석',
+    sentimentScoreLabel: '종합 점수',
+    sentimentGrades: {
+      strong_buy:  '★★★ 적극 매수',
+      buy:         '★★ 매수',
+      neutral:     '★ 중립',
+      sell:        '⚠ 매도',
+      strong_sell: '⛔ 적극 매도',
+    } as Record<string, string>,
+    sentimentFeedbacks: {
+      strong_buy:  '온체인 지표가 역사적 바닥권에 진입했습니다. 모든 신호가 매수에 우호적이며, 장기 관점의 분할 매수를 적극 고려해볼 수 있습니다.',
+      buy:         '대부분의 온체인·기술적 지표가 긍정적입니다. 리스크 관리 하에 분할 매수를 고려해볼 수 있습니다.',
+      neutral:     '지표가 혼조세를 보이고 있습니다. 상승·하락 모두 가능성이 있으므로 방향성 확인 후 대응을 권장합니다.',
+      sell:        '온체인 지표와 기술적 지표가 약세 신호를 보내고 있습니다. 신규 매수보다는 관망 또는 보유 비중 축소를 검토하세요.',
+      strong_sell: '복수 지표에서 극단적 과열이 감지됩니다. 역사적으로 분배·차익실현이 나타나는 구간일 수 있습니다.',
+    } as Record<string, string>,
+    sentimentBreakdown: {
+      nvt:   'NVT 비율',
+      mvrv:  'MVRV Z-스코어',
+      puell: '퓨엘 멀티플',
+      stoch: 'Stoch RSI %K',
+    } as Record<string, string>,
+    nvtReasons: {
+      cold:    'NVT 낮음 — 거래 대비 저평가 구간',
+      normal:  'NVT 정상 — 공정 가치 수준',
+      caution: 'NVT 주의 — 과열 조짐 감지',
+      hot:     'NVT 과열 — 투기적 거품 가능성',
+    } as Record<string, string>,
+    mvrvReasons: {
+      cold:    'MVRV 음수 — 역사적 저점 매집 구간',
+      normal:  'MVRV 정상 — 공정 가치',
+      caution: 'MVRV 높음 — 과열 주의',
+      hot:     'MVRV 극단적 고점 — 분배 구간 경고',
+    } as Record<string, string>,
+    puellReasons: {
+      cold:    '퓨엘 낮음 — 채굴자 수익 부진(매수 기회)',
+      normal:  '퓨엘 정상 — 채굴 수익 건전',
+      caution: '퓨엘 높음 — 채굴자 수익 과도',
+      hot:     '퓨엘 극고 — 역사적 고점 분배 신호',
+    } as Record<string, string>,
+    stochReasons: {
+      cold:    'Stoch %K ≤ 20 — 과매도 · 반등 가능성',
+      low:     'Stoch %K ≤ 40 — 중립 하단',
+      normal:  'Stoch %K ≤ 60 — 중립',
+      caution: 'Stoch %K ≤ 80 — 중립 상단',
+      hot:     'Stoch %K > 80 — 과매수 · 조정 주의',
+    } as Record<string, string>,
+    sentimentNote: '* 온체인·기술적 지표 기반 근사치 알고리즘. 실제 투자 결정에 사용하지 마세요.',
+
+    /* ── 분석 방법론 (Methodology) ──────────────────────── */
+    methodologyTitle: '크립토 분석 기준 안내',
+    methodologySub:   '본 서비스가 사용하는 온체인 지표의 원리와 출처를 이해해 보세요',
+    methodologies: [
+      {
+        emoji: '🔗',
+        name: 'NVT 비율',
+        fullName: 'Network Value to Transactions Ratio',
+        creator: 'Willy Woo & Chris Burniske, 2017',
+        desc: '네트워크 가치(시가총액)를 온체인 거래량으로 나눈 값으로, 주식의 PER(주가수익비율)과 유사한 개념입니다. 낮을수록 실제 사용량 대비 저평가, 높을수록 투기적 과열을 의미합니다. Willy Woo가 비트코인의 내재 가치를 측정하기 위해 2017년 처음 제안했습니다.',
+        note: '※ 본 서비스에서는 실제 온체인 TX 데이터 대신 시가총액 ÷ 28일 평균 달러 거래량으로 근사합니다.',
+      },
+      {
+        emoji: '⚖️',
+        name: 'MVRV Z-스코어',
+        fullName: 'Market Value to Realized Value Z-Score',
+        creator: 'Murad Mahmudov & David Puell, 2018',
+        desc: '시장가치(현재 시가총액)와 실현가치(모든 코인의 평균 취득 원가 기반 시총)의 차이를 표준편차로 정규화한 값입니다. 음수 구간은 역사적 평균보다 저렴한 매집 기회, 3 이상의 고점은 극단적 과열을 뜻합니다.',
+        note: '※ 본 서비스에서는 90일 가격 Z-스코어 (현재가 − 90일 평균) ÷ 90일 표준편차로 근사합니다.',
+      },
+      {
+        emoji: '⛏️',
+        name: '퓨엘 멀티플',
+        fullName: 'Puell Multiple',
+        creator: 'David Puell, 2019',
+        desc: '채굴자의 일일 수익을 365일 이동평균으로 나눈 값입니다. 낮을수록 채굴자 수익이 극도로 낮아 투항 매도 가능성이 높은 바닥 구간, 높을수록 채굴자 수익이 역사적으로 과도한 과열 구간을 시사합니다. 비트코인 반감기 전후로 특히 유효합니다.',
+        note: '※ 본 서비스에서는 당일 달러 거래량 ÷ 90일 평균 달러 거래량 비율로 근사합니다.',
+      },
+    ] as { emoji: string; name: string; fullName: string; creator: string; desc: string; note: string }[],
+
+    /* ── 강력 면책조항 ──────────────────────────────────── */
+    disclaimerTitle:  '⚠️ 가상화폐 투자 유의사항',
+    disclaimerBody:   '가상화폐는 주식 시장과 달리 상하한가 제한이 없고 24시간 연중무휴로 거래되므로 변동성이 극도로 높습니다. 본 서비스가 제공하는 온체인 지표 및 AI 종합 의견은 공개된 시장 데이터를 기반으로 가공된 참고용 수치일 뿐, 특정 자산의 매수/매도를 추천하거나 수익을 보장하지 않습니다. 모든 투자 판단의 최종 책임은 전적으로 투자자 본인에게 있으며, 본 서비스는 투자 결과로 발생한 어떠한 손실에 대해서도 법적 책임을 지지 않습니다.',
+
     /* Footer */
     footerData: '실시간 시장 데이터 (Yahoo Finance)',
     footerNote: '실제 투자 결정에 활용하지 마세요.',
@@ -863,6 +948,91 @@ const crypto = {
     oversold:        'Oversold',
     neutralZone:     'Neutral',
     zone:            'Zone',
+
+    /* ── Crypto Sentiment AI Opinion ──────────────────── */
+    sentimentTitle:      'Crypto Composite Signal',
+    sentimentSub:        'On-Chain + Technical Indicator Synthesis',
+    sentimentScoreLabel: 'Composite Score',
+    sentimentGrades: {
+      strong_buy:  '★★★ Strong Buy',
+      buy:         '★★ Buy',
+      neutral:     '★ Neutral',
+      sell:        '⚠ Sell',
+      strong_sell: '⛔ Strong Sell',
+    } as Record<string, string>,
+    sentimentFeedbacks: {
+      strong_buy:  'On-chain indicators are entering historically deep bottom territory. All signals are bullish — gradual accumulation with a long-term perspective may be worth considering.',
+      buy:         'Most on-chain and technical signals are positive. Buying in tranches with disciplined risk management is advisable.',
+      neutral:     'Mixed signals across indicators. Both upside and downside remain possible — wait for directional confirmation before positioning.',
+      sell:        'On-chain and technical indicators are sending bearish signals. New entries are not advised; consider reducing exposure.',
+      strong_sell: 'Extreme overheating is detected across multiple indicators. Historically, this has been a distribution or profit-taking zone.',
+    } as Record<string, string>,
+    sentimentBreakdown: {
+      nvt:   'NVT Ratio',
+      mvrv:  'MVRV Z-Score',
+      puell: 'Puell Multiple',
+      stoch: 'Stoch RSI %K',
+    } as Record<string, string>,
+    nvtReasons: {
+      cold:    'NVT Low — Undervalued relative to transactions',
+      normal:  'NVT Normal — Fair value territory',
+      caution: 'NVT Caution — Early overheating detected',
+      hot:     'NVT Hot — Speculative bubble risk',
+    } as Record<string, string>,
+    mvrvReasons: {
+      cold:    'MVRV Negative — Historical bottom accumulation zone',
+      normal:  'MVRV Normal — Fair value',
+      caution: 'MVRV Elevated — Overheating caution',
+      hot:     'MVRV Extreme High — Distribution zone warning',
+    } as Record<string, string>,
+    puellReasons: {
+      cold:    'Puell Low — Miner revenue stress (buy signal)',
+      normal:  'Puell Normal — Healthy mining economics',
+      caution: 'Puell High — Miner revenue excessive',
+      hot:     'Puell Extreme — Historical top distribution signal',
+    } as Record<string, string>,
+    stochReasons: {
+      cold:    'Stoch %K ≤ 20 — Oversold · Rebound potential',
+      low:     'Stoch %K ≤ 40 — Neutral lower band',
+      normal:  'Stoch %K ≤ 60 — Neutral',
+      caution: 'Stoch %K ≤ 80 — Neutral upper band',
+      hot:     'Stoch %K > 80 — Overbought · Correction risk',
+    } as Record<string, string>,
+    sentimentNote: '* Reference indicator based on on-chain & technical approximation algorithm. Do not use for actual investment decisions.',
+
+    /* ── Methodology Section ───────────────────────────── */
+    methodologyTitle: 'Crypto Analysis Methodology',
+    methodologySub:   'Understand the on-chain indicators used in this service and their origins',
+    methodologies: [
+      {
+        emoji: '🔗',
+        name: 'NVT Ratio',
+        fullName: 'Network Value to Transactions Ratio',
+        creator: 'Willy Woo & Chris Burniske, 2017',
+        desc: 'Market cap divided by on-chain transaction volume — analogous to a P/E ratio for crypto networks. Low values suggest the network is undervalued relative to actual usage; high values signal speculative excess beyond real-world utility. First proposed by Willy Woo in 2017 to assess Bitcoin\'s intrinsic value.',
+        note: '※ This service approximates using market cap ÷ 28-day average dollar volume instead of actual on-chain TX data.',
+      },
+      {
+        emoji: '⚖️',
+        name: 'MVRV Z-Score',
+        fullName: 'Market Value to Realized Value Z-Score',
+        creator: 'Murad Mahmudov & David Puell, 2018',
+        desc: 'The gap between market cap and realized cap (based on all coins valued at their last-moved price), normalized by standard deviation. Negative readings signal historically cheap accumulation zones; scores above 3 indicate extreme overheating that has historically preceded major bear markets.',
+        note: '※ This service approximates using the 90-day price Z-score: (current price − 90d mean) ÷ 90d std dev.',
+      },
+      {
+        emoji: '⛏️',
+        name: 'Puell Multiple',
+        fullName: 'Puell Multiple',
+        creator: 'David Puell, 2019',
+        desc: "Daily miner revenue divided by its 365-day moving average. Low values indicate miner capitulation (a historically reliable buy signal near market bottoms); high values suggest miners are earning far above the long-run average, which has historically coincided with market tops. Particularly significant around Bitcoin halving cycles.",
+        note: '※ This service approximates using current dollar volume ÷ 90-day average dollar volume.',
+      },
+    ] as { emoji: string; name: string; fullName: string; creator: string; desc: string; note: string }[],
+
+    /* ── Strong Disclaimer ─────────────────────────────── */
+    disclaimerTitle:  '⚠️ Cryptocurrency Investment Notice',
+    disclaimerBody:   'Unlike traditional stock markets, cryptocurrencies have no price-change limits and trade 24 hours a day, 365 days a year, making them subject to extreme volatility. The on-chain indicators and AI composite opinions provided by this service are reference-only figures derived from publicly available market data; they do not constitute a recommendation to buy or sell any asset, nor do they guarantee any return. The sole and full responsibility for all investment decisions lies with the individual investor. This service shall not be held legally liable for any losses arising from investment outcomes under any circumstances.',
 
     /* Footer */
     footerData: 'Real-time market data (Yahoo Finance)',
