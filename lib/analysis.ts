@@ -971,44 +971,51 @@ export function calcDynamicWeightedScore(input: DynamicScoreInput): DynamicScore
 
 /** 백테스팅 엔진이 필요로 하는 차트 행 최소 인터페이스
  *  (mockData.ts ChartRow의 순환 참조를 피하기 위해 로컬 덕타입 정의)
+ *  ChartRow extends PriceBar(close, high…) + sma20/sma60/rsi → 완전 호환
  */
 interface BacktestBar {
-  close:  number;
-  rsi:    number | null;
-  sma20:  number | null;
-  sma60:  number | null;
+  close: number;
+  /** 일간 최고가 — 피크 수익률 및 +5% 터치 판별에 사용. 없으면 close로 대체 */
+  high?:  number;
+  rsi:   number | null;
+  sma20: number | null;
+  sma60: number | null;
 }
 
 export interface BacktestResult {
-  /** 예측 적중률 % (0–100) */
-  hitRate:         number;
-  /** 탐색 윈도우 내 시그널 총 횟수 */
-  totalSignals:    number;
-  /** 그 중 수익 발생 횟수 (적중) */
-  correctSignals:  number;
-  /** 시그널 발동 후 평균 수익률 % */
-  avgReturnPct:    number;
+  /** 예측 적중률 % (0–100)
+   *  = 30거래일 내 종가 기준 시그널 이후 +5% 터치 비율 */
+  hitRate:          number;
+  /** 탐색 윈도우 내 매수 시그널 총 횟수 */
+  totalSignals:     number;
+  /** 그 중 +5% 이상 터치 횟수 (적중) */
+  correctSignals:   number;
+  /** 시그널 발동 후 30거래일 내 평균 최고 수익률 % */
+  avgPeakGainPct:   number;
+  /** 시그널 발동 후 30거래일 종가 기준 평균 수익률 % */
+  avgReturnPct:     number;
   /** 현재 시장 국면 */
-  regime:          MarketRegime;
+  regime:           MarketRegime;
   /** 실제 사용한 회고 기간 (거래일) */
-  lookbackDays:    number;
+  lookbackDays:     number;
 }
 
 export interface BacktestInput {
   chartRows:    BacktestBar[];
   allPrices:    number[];
-  piotroskiRaw: number;      // 0–9
+  piotroskiRaw: number;
   pegResult:    PegResult;
 }
 
 export function runBacktest(input: BacktestInput): BacktestResult {
   const { chartRows, allPrices, piotroskiRaw, pegResult } = input;
 
-  const n             = chartRows.length;
-  const HOLDING       = 30;                             // 보유 기간 (거래일)
-  const LOOKBACK      = Math.min(90, n);
-  const signalStart   = Math.max(0, n - LOOKBACK);
-  const signalEnd     = Math.max(0, n - HOLDING - 1);  // 미래 데이터 확보용
+  const n           = chartRows.length;
+  const HOLDING     = 30;
+  const LOOKBACK    = Math.min(90, n);
+  const HIT_TARGET  = 1.05;                           // 적중 기준: +5% 터치
+  const signalStart = Math.max(0, n - LOOKBACK);
+  const signalEnd   = Math.max(0, n - HOLDING - 1);
 
   const signals: Array<{ idx: number; entryPrice: number }> = [];
 
@@ -1016,9 +1023,8 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     const row  = chartRows[i];
     const prev = chartRows[i - 1];
 
-    // MA 추세 판단 (pre-calculated SMA20/SMA60 직접 활용)
-    const sma20 = row.sma20  ?? 0;
-    const sma60 = row.sma60  ?? 0;
+    const sma20  = row.sma20  ?? 0;
+    const sma60  = row.sma60  ?? 0;
     const pSma20 = prev?.sma20 ?? sma20;
     const pSma60 = prev?.sma60 ?? sma60;
 
@@ -1028,49 +1034,60 @@ export function runBacktest(input: BacktestInput): BacktestResult {
     else if (sma20 > sma60)                      cross = 'uptrend';
     else if (sma20 < sma60)                      cross = 'downtrend';
 
-    // 해당 시점까지의 종가로 국면 감지
     const pricesUpTo = allPrices.slice(0, i + 1);
     const regime     = detectMarketRegime(pricesUpTo);
     const weights    = REGIME_WEIGHTS[regime];
 
-    const fScore = Math.min(100, (piotroskiRaw / 9) * 100);
-    const gScore = normalizePegToScore(pegResult);
-    const tScore = calcTechScore(row.rsi, cross);
-
     const dynScore = Math.round(
-      fScore * weights.financial +
-      gScore * weights.growth    +
-      tScore * weights.technical,
+      Math.min(100, (piotroskiRaw / 9) * 100) * weights.financial +
+      normalizePegToScore(pegResult)           * weights.growth    +
+      calcTechScore(row.rsi, cross)            * weights.technical,
     );
 
-    if (dynScore >= 60) {
-      signals.push({ idx: i, entryPrice: row.close });
-    }
+    if (dynScore >= 60) signals.push({ idx: i, entryPrice: row.close });
   }
 
   if (signals.length === 0) {
     return {
       hitRate: 50.0, totalSignals: 0, correctSignals: 0,
-      avgReturnPct: 0, regime: detectMarketRegime(allPrices), lookbackDays: LOOKBACK,
+      avgPeakGainPct: 0, avgReturnPct: 0,
+      regime: detectMarketRegime(allPrices), lookbackDays: LOOKBACK,
     };
   }
 
-  let hits = 0;
-  let totalRet = 0;
+  let hits       = 0;
+  let totalPeak  = 0;
+  let totalRet   = 0;
 
   for (const sig of signals) {
-    const exitIdx   = Math.min(sig.idx + HOLDING, n - 1);
-    const exitPrice = chartRows[exitIdx].close;
-    const ret       = sig.entryPrice > 0 ? (exitPrice - sig.entryPrice) / sig.entryPrice : 0;
-    if (exitPrice > sig.entryPrice) hits++;
-    totalRet += ret;
+    const exitIdx = Math.min(sig.idx + HOLDING, n - 1);
+
+    // 보유 기간 내 최고가 추적 (high 있으면 우선, 없으면 close)
+    let peakPrice = chartRows[sig.idx].high ?? chartRows[sig.idx].close;
+    for (let j = sig.idx + 1; j <= exitIdx; j++) {
+      const h = chartRows[j].high ?? chartRows[j].close;
+      if (h > peakPrice) peakPrice = h;
+    }
+
+    const peakGain = sig.entryPrice > 0 ? (peakPrice - sig.entryPrice) / sig.entryPrice : 0;
+    const exitRet  = sig.entryPrice > 0
+      ? (chartRows[exitIdx].close - sig.entryPrice) / sig.entryPrice
+      : 0;
+
+    // 적중 조건: 보유 기간 내 +5% 이상 터치
+    if (sig.entryPrice > 0 && peakPrice >= sig.entryPrice * HIT_TARGET) hits++;
+
+    totalPeak += peakGain;
+    totalRet  += exitRet;
   }
 
+  const cnt = signals.length;
   return {
-    hitRate:        Math.round((hits / signals.length) * 1000) / 10,   // 소수점 1자리
-    totalSignals:   signals.length,
+    hitRate:        Math.round((hits / cnt) * 1000) / 10,
+    totalSignals:   cnt,
     correctSignals: hits,
-    avgReturnPct:   Math.round((totalRet / signals.length) * 1000) / 10,
+    avgPeakGainPct: Math.round((totalPeak / cnt) * 1000) / 10,
+    avgReturnPct:   Math.round((totalRet  / cnt) * 1000) / 10,
     regime:         detectMarketRegime(allPrices),
     lookbackDays:   LOOKBACK,
   };

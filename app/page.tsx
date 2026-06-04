@@ -1089,36 +1089,41 @@ function AIScoreWidget({ company, params, chartData, stockData, t }: {
           <div className="bg-gray-800/50 rounded-xl p-3 text-xs text-gray-300 leading-relaxed border border-gray-700/50">
             💡 {feedbackT}
           </div>
-          {/* 백테스팅 메타 텍스트 */}
-          <p className="text-[10px] text-gray-600 mt-2 leading-relaxed">
-            📊 {t.backtestPeriod} · {btResult.lookbackDays}{t.backtestDays}
-            {btResult.totalSignals > 0
-              ? ` · ${btResult.totalSignals}${t.backtestSignalsSuffix}`
-              : ` · ${t.backtestNoSignals}`
-            }
-          </p>
         </div>
       </div>
 
-      {/* ── 기존 4개 브레이크다운 바 ── */}
-      <div className="mt-4 sm:mt-5 space-y-3">
+      {/* ── 4개 브레이크다운 바 (가독성 개선: 구조화 레이아웃) ── */}
+      <div className="mt-5 space-y-4">
         {aiScore.breakdown.map(item => {
           const pct    = (item.points / item.maxPoints) * 100;
           const barCol = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-rose-500';
           const catT   = t.aiCategories[item.category] ?? item.category;
+          /* reason 텍스트를 " — " 로 분리해 핵심 수치와 해석을 레이어링 */
+          const [factPart, interpretPart] = item.reason.split(' — ');
           return (
-            <div key={item.category}>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs font-semibold text-gray-300">{catT}</span>
-                <span className="text-xs font-bold text-gray-200">
-                  {item.points} <span className="text-gray-600">/ {item.maxPoints}</span>
+            <div key={item.category} className="group">
+              {/* 레이블 + 점수 행 */}
+              <div className="flex justify-between items-baseline mb-1.5">
+                <span className="text-xs font-bold text-gray-200 tracking-tight">{catT}</span>
+                <span className="text-xs font-bold">
+                  <span className={pct >= 70 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-rose-400'}>
+                    {item.points}
+                  </span>
+                  <span className="text-gray-600"> / {item.maxPoints}</span>
                 </span>
               </div>
-              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden mb-1">
+              {/* 진행 바 */}
+              <div className="h-2 bg-gray-800/80 rounded-full overflow-hidden mb-2">
                 <div className={cn('h-full rounded-full transition-all duration-700', barCol)}
                   style={{ width: `${pct}%` }} />
               </div>
-              <p className="text-[11px] text-gray-600 leading-relaxed">{item.reason}</p>
+              {/* 구조화 이유 텍스트 */}
+              <div className="pl-2.5 border-l-2 border-gray-700/60 space-y-0.5">
+                <p className="text-[11px] font-medium text-gray-400 leading-snug">{factPart}</p>
+                {interpretPart && (
+                  <p className="text-[10px] text-gray-600 leading-snug">↳ {interpretPart}</p>
+                )}
+              </div>
             </div>
           );
         })}
@@ -1197,7 +1202,7 @@ function AIScoreWidget({ company, params, chartData, stockData, t }: {
           ))}
         </div>
 
-        {/* 백테스팅 요약 */}
+        {/* 백테스팅 요약 — 적중률 + 평균 최고 수익률 */}
         {btResult.totalSignals > 0 && (
           <div className="flex items-center gap-3 pt-2 border-t border-gray-800/40 flex-wrap">
             <div className="flex items-center gap-1.5">
@@ -1212,11 +1217,11 @@ function AIScoreWidget({ company, params, chartData, stockData, t }: {
             <div className="flex items-center gap-1.5">
               <span className={cn(
                 'text-xs font-bold',
-                btResult.avgReturnPct >= 0 ? 'text-emerald-400' : 'text-rose-400',
+                btResult.avgPeakGainPct >= 0 ? 'text-emerald-400' : 'text-rose-400',
               )}>
-                {btResult.avgReturnPct >= 0 ? '+' : ''}{btResult.avgReturnPct.toFixed(1)}%
+                {btResult.avgPeakGainPct >= 0 ? '+' : ''}{btResult.avgPeakGainPct.toFixed(1)}%
               </span>
-              <span className="text-[10px] text-gray-500">{t.backtestAvgReturn}</span>
+              <span className="text-[10px] text-gray-500">{t.btAvgPeakEnLabel}</span>
             </div>
             <span className="text-[10px] text-gray-700 ml-auto">
               ({btResult.correctSignals}/{btResult.totalSignals})
@@ -1224,6 +1229,201 @@ function AIScoreWidget({ company, params, chartData, stockData, t }: {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * 6-B. BacktestReportCard — AI 알고리즘 과거 적중률 검증 리포트
+ *      3대 핵심 퀀트 메트릭을 와이드 카드로 독립 신설
+ * ═══════════════════════════════════════════════════════════════ */
+function BacktestReportCard({ stockData, chartData, t }: {
+  stockData: StockData;
+  chartData: MockDataResult;
+  t: DashboardT;
+}) {
+  /* ── 툴팁 상태 및 바깥 클릭 감지 ── */
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showTooltip) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node))
+        setShowTooltip(false);
+    };
+    document.addEventListener('mousedown', close, true);
+    document.addEventListener('touchstart', close, true);
+    return () => {
+      document.removeEventListener('mousedown', close, true);
+      document.removeEventListener('touchstart', close, true);
+    };
+  }, [showTooltip]);
+
+  /* ── 지표 계산 ── */
+  const piotroskiRaw = useMemo(() => calculatePiotroski({
+    returnOnAssets:    stockData.returnOnAssets,
+    operatingCashflow: stockData.operatingCashflow,
+    netIncome:         stockData.netIncome,
+    fcf:               stockData.fcf,
+    grossMargin:       stockData.grossMargin,
+    debtToEquity:      stockData.debtToEquity,
+    currentRatio:      stockData.currentRatio,
+    operatingMargin:   stockData.operatingMargin,
+    roe:               stockData.roe,
+    netMargin:         stockData.netMargin,
+  }).score, [stockData]);
+
+  const pegResult = useMemo(() =>
+    calculatePegScore(stockData.per, stockData.earningsGrowth, stockData.pegRatio),
+    [stockData.per, stockData.earningsGrowth, stockData.pegRatio],
+  );
+
+  const bt = useMemo(() => runBacktest({
+    chartRows:    chartData.chartRows,
+    allPrices:    chartData.allPrices,
+    piotroskiRaw,
+    pegResult,
+  }), [chartData, piotroskiRaw, pegResult]);
+
+  /* ── 컬러 맵 ── */
+  const hitColor   = bt.hitRate >= 70
+    ? 'text-emerald-400' : bt.hitRate >= 55 ? 'text-amber-400' : 'text-rose-400';
+  const peakColor  = bt.avgPeakGainPct >= 10
+    ? 'text-emerald-400' : bt.avgPeakGainPct >= 0 ? 'text-teal-400' : 'text-rose-400';
+  const regimeClx  = regimeBadgeStyle(bt.regime);
+  const regimeText =
+    bt.regime === 'bull' ? t.regimeBull :
+    bt.regime === 'bear' ? t.regimeBear : t.regimeSideways;
+
+  const noSignal = bt.totalSignals === 0;
+  const subText  = (t.btReportSub as string).replace('{n}', String(bt.lookbackDays));
+
+  return (
+    <div className="bg-[#0b1524] border border-blue-900/25 rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/20">
+
+      {/* 카드 헤더 */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5 sm:mb-6">
+        <div>
+          <h3 className="text-white font-bold text-sm sm:text-base flex items-center gap-2">
+            <span className="w-5 h-5 rounded-md bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-[11px]">📊</span>
+            {t.btReportTitle}
+          </h3>
+          <p className="text-gray-500 text-xs mt-1">{subText}</p>
+        </div>
+        <span className={cn(
+          'text-[10px] font-bold px-2.5 py-1 rounded-full border flex-shrink-0',
+          regimeClx,
+        )}>
+          {t.regimeLabel}: {regimeText}
+        </span>
+      </div>
+
+      {/* 시그널 없음 */}
+      {noSignal ? (
+        <div className="flex items-center gap-3 px-4 py-5 rounded-2xl bg-gray-900/40 border border-gray-800/40 text-center">
+          <Info className="w-4 h-4 text-gray-600 flex-shrink-0" />
+          <p className="text-gray-500 text-sm">{t.btNoSignalMsg}</p>
+        </div>
+      ) : (
+        /* ── 3대 핵심 메트릭 그리드 ── */
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+
+          {/* 메트릭 1: 예측 적중률 */}
+          <div className="bg-gray-900/50 border border-gray-800/50 rounded-2xl p-4 sm:p-5 flex flex-col gap-2">
+            {/* 레이블 + 툴팁 */}
+            <div className="flex items-center gap-1.5 flex-wrap" ref={tooltipRef}>
+              <span className="text-xs font-semibold text-gray-400">{t.btHitRateLabel}</span>
+              <span className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowTooltip(v => !v)}
+                  aria-label="적중률 산출 공식 설명"
+                  className={cn(
+                    'p-0.5 -m-0.5 transition-colors rounded touch-manipulation',
+                    showTooltip ? 'text-blue-400' : 'text-gray-600 hover:text-blue-400',
+                  )}
+                >
+                  <HelpCircle className="w-3.5 h-3.5" />
+                </button>
+                {showTooltip && (
+                  <div
+                    role="tooltip"
+                    className={cn(
+                      'absolute z-50 bottom-full mb-3',
+                      'left-0 sm:left-1/2 sm:-translate-x-1/2',
+                      'w-64 sm:w-80',
+                      'rounded-2xl px-4 py-3',
+                      'bg-[#0d1929] border border-blue-500/25',
+                      'text-[11px] text-gray-300 leading-relaxed',
+                      'shadow-2xl shadow-black/70',
+                    )}
+                  >
+                    {t.btHitRateTooltip}
+                    <span className={cn(
+                      'absolute top-full border-x-4 border-x-transparent border-t-4 border-t-[#0d1929]',
+                      'left-4 sm:left-1/2 sm:-translate-x-1/2',
+                    )} />
+                  </div>
+                )}
+              </span>
+              <span className="text-[10px] text-gray-600">{t.btHitRateEnLabel}</span>
+            </div>
+            {/* 수치 */}
+            <p className={cn('text-3xl md:text-4xl font-extrabold leading-none tabular-nums', hitColor)}>
+              {bt.hitRate.toFixed(1)}%
+            </p>
+            {/* 서브 */}
+            <p className="text-[11px] text-gray-600">
+              <span className="font-semibold text-gray-400">{bt.correctSignals}</span>
+              {t.btOutOf}
+              <span className="font-semibold text-gray-400">{bt.totalSignals}</span>
+              {' '}{t.btCorrectLabel}
+            </p>
+            {/* 적중 기준 */}
+            <div className="mt-auto pt-2 border-t border-gray-800/40">
+              <span className="text-[10px] text-gray-700">{t.btThreshold}</span>
+            </div>
+          </div>
+
+          {/* 메트릭 2: 평균 최고 수익률 */}
+          <div className="bg-gray-900/50 border border-gray-800/50 rounded-2xl p-4 sm:p-5 flex flex-col gap-2">
+            <div>
+              <span className="text-xs font-semibold text-gray-400">{t.btAvgPeakLabel}</span>
+              <p className="text-[10px] text-gray-600">{t.btAvgPeakEnLabel}</p>
+            </div>
+            <p className={cn('text-3xl md:text-4xl font-extrabold leading-none tabular-nums', peakColor)}>
+              {bt.avgPeakGainPct >= 0 ? '+' : ''}{bt.avgPeakGainPct.toFixed(1)}%
+            </p>
+            <p className="text-[11px] text-gray-600">{t.btAvgPeakDesc}</p>
+            <div className="mt-auto pt-2 border-t border-gray-800/40">
+              <span className="text-[10px] text-gray-700">{t.btHoldingDays}</span>
+            </div>
+          </div>
+
+          {/* 메트릭 3: 검증된 총 시그널 수 */}
+          <div className="bg-gray-900/50 border border-gray-800/50 rounded-2xl p-4 sm:p-5 flex flex-col gap-2">
+            <div>
+              <span className="text-xs font-semibold text-gray-400">{t.btSignalCountLabel}</span>
+              <p className="text-[10px] text-gray-600">{t.btSignalCountEnLabel}</p>
+            </div>
+            <p className="text-3xl md:text-4xl font-extrabold leading-none tabular-nums text-white">
+              {bt.totalSignals}
+            </p>
+            <p className="text-[11px] text-gray-600">{t.btSignalCountUnit}</p>
+            <div className="mt-auto pt-2 border-t border-gray-800/40">
+              <span className="text-[10px] text-gray-700">
+                {bt.lookbackDays}{t.backtestDays} {t.backtestPeriod}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 시뮬레이션 면책 주석 */}
+      <p className="text-[10px] text-gray-700 mt-4 pt-4 border-t border-gray-800/30 leading-relaxed">
+        ⚠️ {t.btSimNote}
+      </p>
     </div>
   );
 }
@@ -1837,7 +2037,7 @@ export default function StockDashboard() {
       )}
 
       {/* ── MAIN ────────────────────────────────── */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 space-y-6 sm:space-y-8">
 
         <ProfileCard
           company={company}
@@ -1870,7 +2070,7 @@ export default function StockDashboard() {
 
         {/* ── 펀더멘탈 탭 ─────────────────────────── */}
         {activeTab === 'fundamental' && (
-          <div className="space-y-4 sm:space-y-5">
+          <div className="space-y-6 sm:space-y-8">
             <SectionDivider label={t.secMetrics} />
 
             {/* 밸류에이션 지표 4개 — 모바일 1열, md 2열, lg 4열 */}
@@ -1908,14 +2108,20 @@ export default function StockDashboard() {
 
             <SectionDivider label={t.secAI} />
             <AIScoreWidget company={company} params={dcfParams} chartData={chartData} stockData={stockData} t={t} />
+
+            <SectionDivider label={t.secBacktest} />
+            <BacktestReportCard stockData={stockData} chartData={chartData} t={t} />
           </div>
         )}
 
         {/* ── 기술적 차트 탭 ──────────────────────── */}
         {activeTab === 'technical' && (
-          <div className="space-y-4 sm:space-y-5">
+          <div className="space-y-6 sm:space-y-8">
             <SectionDivider label={t.secAI} />
             <AIScoreWidget company={company} params={dcfParams} chartData={chartData} stockData={stockData} t={t} />
+
+            <SectionDivider label={t.secBacktest} />
+            <BacktestReportCard stockData={stockData} chartData={chartData} t={t} />
 
             <SectionDivider label={t.secPriceChart} />
             <PriceChart rows={displayChartRows} fmtPx={fmtPx} t={t} />
@@ -1930,7 +2136,7 @@ export default function StockDashboard() {
         )}
         {/* ── 대가의 투자 시그널 탭 ──────────────── */}
         {activeTab === 'guru' && (
-          <div className="space-y-4 sm:space-y-5">
+          <div className="space-y-6 sm:space-y-8">
             <SectionDivider label={t.guruSection} />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
               <PegAnalysis    stockData={stockData} t={t} />
