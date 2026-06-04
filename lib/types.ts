@@ -119,6 +119,155 @@ export interface CryptoData {
   puell: CryptoMetric;
 }
 
+/* ─────────────────────────────────────────────
+ * Market Pulse Types  (/api/market)
+ * ───────────────────────────────────────────── */
+
+/**
+ * 한국 주식 표준화 인터페이스
+ * 향후 한국투자증권 Open API(KIS) 또는 DART API 스위칭을 위한 단일 계약 타입
+ *
+ * KIS API 주요 필드 매핑:
+ *  stck_prpr     → currentPrice      (현재가)
+ *  prdy_vrss     → changeAmount      (전일 대비)
+ *  prdy_ctrt     → changePercent     (등락률)
+ *  acml_vol      → volume            (누적 거래량)
+ *  acml_tr_pbmn  → turnover          (누적 거래대금)
+ *  hts_kor_isnm  → name              (종목명)
+ *  mksc_shrn_iscd→ ticker            (단축 종목코드)
+ *
+ * DART OpenAPI 주요 필드 매핑:
+ *  stock_code → ticker
+ *  corp_name  → name
+ */
+export interface DomesticStockData {
+  /** 종목 코드 (6자리, KIS: mksc_shrn_iscd) */
+  ticker: string;
+  /** 종목명 (KIS: hts_kor_isnm) */
+  name: string;
+  /** 상장 시장 */
+  market: 'KOSPI' | 'KOSDAQ' | 'KONEX';
+  /** GICS 섹터 분류 */
+  sector: string;
+  /** 세부 산업 분류 */
+  industry: string;
+  /** 현재가 KRW (KIS: stck_prpr) */
+  currentPrice: number;
+  /** 전일 대비 등락 KRW (KIS: prdy_vrss) */
+  changeAmount: number;
+  /** 등락률 % (KIS: prdy_ctrt) */
+  changePercent: number;
+  /** 누적 거래량 주 (KIS: acml_vol) */
+  volume: number;
+  /** 누적 거래대금 KRW (KIS: acml_tr_pbmn) */
+  turnover: number;
+  /** 시가총액 억 KRW (KIS: stck_avls) */
+  marketCapBillionKRW: number;
+  /** PER (KIS: per) */
+  per?: number;
+  /** PBR (KIS: pbr) */
+  pbr?: number;
+  /** ROE % */
+  roe?: number;
+  /** 외국인 보유율 % (KIS: frgn_hldn_qty_rate) */
+  foreignHolding?: number;
+  /** 52주 최고가 (KIS: d250_hgpr) */
+  week52High?: number;
+  /** 52주 최저가 (KIS: d250_lwpr) */
+  week52Low?: number;
+  /**
+   * 데이터 공급처
+   * - 'kis'  : 한국투자증권 Open API
+   * - 'dart' : 금융감독원 DART OpenAPI
+   * - 'naver': 네이버 금융 스크래핑 (비공식)
+   * - 'mock' : 시뮬레이션 가상 데이터
+   */
+  dataSource: 'kis' | 'dart' | 'naver' | 'mock';
+  /** ISO 타임스탬프 */
+  fetchedAt: string;
+}
+
+/** 마켓 무버 단일 항목 (급등·급락·거래량 랭킹) */
+export interface MarketMover {
+  /** 랭킹 (1부터 시작) */
+  rank: number;
+  /** 티커 / 종목코드 */
+  ticker: string;
+  /** 종목명 */
+  name: string;
+  /** 시장 구분 */
+  market: 'KR' | 'US';
+  /** 거래소 */
+  exchange: 'KOSPI' | 'KOSDAQ' | 'NYSE' | 'NASDAQ';
+  /** 현재가 */
+  currentPrice: number;
+  /** 등락률 % */
+  changePercent: number;
+  /** 등락 절대값 */
+  changeAmount: number;
+  /** 포맷된 거래량 문자열 ('4.2억주' | '45.2M') */
+  volume: string;
+  /** 통화 */
+  currency: 'KRW' | 'USD';
+}
+
+/** 트렌딩 섹터 내 개별 추천 종목 */
+export interface SectorStock {
+  /** 티커 / 종목코드 */
+  ticker: string;
+  /** 종목명 */
+  name: string;
+  /** 시장 구분 */
+  market: 'KR' | 'US';
+  /** 거래소 */
+  exchange: 'KOSPI' | 'KOSDAQ' | 'NYSE' | 'NASDAQ';
+  /** 대장주(시총 1위) 또는 이슈주(뉴스 트렌드) */
+  role: 'leader' | 'issue';
+  /** 추천 사유 KO/EN */
+  reason: { ko: string; en: string };
+  /** 당일 등락률 % */
+  changePercent: number;
+  /** 현재가 */
+  currentPrice: number;
+  /** 통화 */
+  currency: 'KRW' | 'USD';
+}
+
+/** 트렌딩 섹터 */
+export interface TrendingSector {
+  /** 섹터 고유 ID */
+  id: string;
+  /** 대표 이모지 */
+  emoji: string;
+  /** 섹터명 KO/EN */
+  name: { ko: string; en: string };
+  /** 핵심 키워드·세부 테마 KO/EN */
+  theme: { ko: string; en: string };
+  /** 이번 시즌 핫한 이유 KO/EN (1–2문장) */
+  reason: { ko: string; en: string };
+  /** 색상 테마 키 (페이지에서 클래스 매핑) */
+  colorKey: 'blue' | 'violet' | 'amber';
+  /** 대장주 + 이슈주 (최대 2개) */
+  stocks: SectorStock[];
+}
+
+/** /api/market 성공 응답 타입 */
+export interface MarketPulseData {
+  movers: {
+    kr: { gainers: MarketMover[]; losers: MarketMover[]; volume: MarketMover[] };
+    us: { gainers: MarketMover[]; losers: MarketMover[]; volume: MarketMover[] };
+  };
+  sectors: TrendingSector[];
+  /** ISO 타임스탬프 */
+  fetchedAt: string;
+  /**
+   * 데이터 소스
+   * - 'mock': 시뮬레이션 데이터 (현재값)
+   * - 'live': 실제 API 연동 시
+   */
+  dataSource: 'mock' | 'live';
+}
+
 /** /api/stock의 HTTP 4xx·5xx 에러 응답 타입 */
 export interface ApiErrorResponse {
   error: string;

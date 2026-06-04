@@ -871,9 +871,13 @@ export default function CryptoDashboard() {
               </span>
             </div>
 
-            {/* GNB 탭 */}
+            {/* GNB 탭: Market / Stocks / Crypto(active) */}
             <div className="flex gap-0.5 p-0.5 rounded-xl flex-shrink-0"
               style={{ backgroundColor: '#0d1120', border: '1px solid #2d1f4a' }}>
+              <Link href="/market"
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors">
+                {t.navMarket}
+              </Link>
               <Link href="/"
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors">
                 {t.navStock}

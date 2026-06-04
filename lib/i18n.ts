@@ -255,6 +255,7 @@ const dashboard = {
     magicNote: '※ EV/EBITDA 미제공 시 PER 기반으로 대체 계산됩니다.',
 
     /* ── GNB 탐색 링크 ──────────────────────────────────── */
+    navMarket: '📈 마켓',
     navStock:  '📊 주식',
     navCrypto: '₿ 크립토',
   },
@@ -500,6 +501,7 @@ const dashboard = {
     magicNote: '※ Falls back to P/E-based EY when EV/EBITDA is unavailable.',
 
     /* ── GNB navigation links ───────────────────────────── */
+    navMarket: '📈 Market',
     navStock:  '📊 Stocks',
     navCrypto: '₿ Crypto',
   },
@@ -739,6 +741,7 @@ const crypto = {
     retryBtn:          '다시 시도',
 
     /* GNB */
+    navMarket: '📈 마켓',
     navStock:  '📊 주식',
     navCrypto: '₿ 크립토',
 
@@ -896,6 +899,7 @@ const crypto = {
     retryBtn:          'Retry',
 
     /* GNB */
+    navMarket: '📈 Market',
     navStock:  '📊 Stocks',
     navCrypto: '₿ Crypto',
 
@@ -1042,16 +1046,140 @@ const crypto = {
 } as const;
 
 // ─────────────────────────────────────────────
+// Market Pulse page (app/market/page.tsx)
+// ─────────────────────────────────────────────
+const market = {
+  ko: {
+    /* Brand / GNB */
+    brandTag:  'AI 마켓 펄스',
+    navMarket: '📈 마켓',
+    navStock:  '📊 주식',
+    navCrypto: '₿ 크립토',
+
+    /* Hero */
+    heroTitle: 'Market Pulse',
+    heroSub:   '실시간 시장 동향 · 주도 섹터 분석 · 급등락 랭킹',
+    heroBadge: '시뮬레이션 데이터',
+
+    /* 데이터 안내 배너 */
+    dataBannerText: '본 데이터는 실제 시장을 반영하지 않는 시뮬레이션 참고용입니다. 향후 한국투자증권 Open API 또는 DART API 연동 시 실시간 업데이트됩니다.',
+
+    /* Market Movers */
+    moversTitle: '실시간 마켓 무버',
+    moversSub:   '당일 시장 급등락 및 거래량 이슈 종목 Top 5',
+    tabKR: '🇰🇷 한국',
+    tabUS: '🇺🇸 미국',
+    tabGainers: '급등주',
+    tabLosers:  '급락주',
+    tabVolume:  '거래량',
+    rankLabel:   '순위',
+    tickerLabel: '종목',
+    changeLabel: '등락률',
+    priceLabel:  '현재가',
+    volumeLabel: '거래량',
+    gainNote: '한국 시장: 🔴 상승 · 🔵 하락  |  미국 시장: 🟢 상승 · 🔵 하락',
+
+    /* Trending Sectors */
+    sectorsTitle: '주도 섹터 & 이슈 종목',
+    sectorsSub:   '현재 시장을 이끌고 있는 핵심 섹터와 대장주·이슈주',
+    sectorsNote:  '본 섹터 정보는 시장 거래대금 및 뉴스 빅데이터 분석 기준 참고용입니다.',
+    leaderTag:    '대장주',
+    issueTag:     '이슈주',
+    viewDetail:   '상세 보기 ↓',
+    closeDetail:  '접기 ↑',
+    reasonLabel:  '선정 사유',
+    priceChange:  '당일 등락률',
+
+    /* Quick Navigation */
+    quickNavTitle: '개별 종목 심층 분석',
+    quickNavSub:   '주식·크립토 분석 페이지에서 DCF, AI 점수, 온체인 지표를 확인하세요.',
+    toStockBtn:    '📊 주식 분석 →',
+    toCryptoBtn:   '₿ 크립토 분석 →',
+
+    /* Footer Disclaimer */
+    disclaimerTitle: '상업용 투자 면책조항',
+    disclaimerBody:  '본 서비스가 제공하는 섹터 및 종목 추천은 퀀트 알고리즘에 기반한 통계 자료일 뿐, 특정 종목의 매수/매도를 유도하지 않으며 투자 손실에 대한 책임은 지지 않습니다.',
+    footerNote:      '실제 투자 결정에 활용하지 마세요.',
+
+    /* Loading / Error */
+    loading: '마켓 데이터 로딩 중…',
+    errorTitle: '데이터 로딩 실패',
+    errorHint:  '잠시 후 다시 시도해 주세요.',
+    retryBtn:   '다시 시도',
+  },
+
+  en: {
+    /* Brand / GNB */
+    brandTag:  'AI Market Pulse',
+    navMarket: '📈 Market',
+    navStock:  '📊 Stocks',
+    navCrypto: '₿ Crypto',
+
+    /* Hero */
+    heroTitle: 'Market Pulse',
+    heroSub:   'Real-time market trends · Leading sectors · Mover rankings',
+    heroBadge: 'Simulated Data',
+
+    /* Data note banner */
+    dataBannerText: 'This data is simulated and does not reflect actual market conditions. It will update in real-time once integrated with Korea Investment & Securities Open API or DART API.',
+
+    /* Market Movers */
+    moversTitle: 'Market Movers',
+    moversSub:   "Today's top gainers, losers & volume surges — Top 5",
+    tabKR: '🇰🇷 Korea',
+    tabUS: '🇺🇸 US',
+    tabGainers: 'Top Gainers',
+    tabLosers:  'Top Losers',
+    tabVolume:  'Top Volume',
+    rankLabel:   'Rank',
+    tickerLabel: 'Stock',
+    changeLabel: 'Change %',
+    priceLabel:  'Price',
+    volumeLabel: 'Volume',
+    gainNote: 'Korea: 🔴 Up · 🔵 Down  |  US: 🟢 Up · 🔵 Down',
+
+    /* Trending Sectors */
+    sectorsTitle: 'Trending Sectors & Key Stocks',
+    sectorsSub:   'The hottest sectors driving the market — leaders and issue stocks',
+    sectorsNote:  'Sector data is for reference purposes only, based on market turnover and news big-data analysis.',
+    leaderTag:    'Sector Leader',
+    issueTag:     'Issue Stock',
+    viewDetail:   'View Detail ↓',
+    closeDetail:  'Close ↑',
+    reasonLabel:  'Why This Stock',
+    priceChange:  "Today's Change",
+
+    /* Quick Navigation */
+    quickNavTitle: 'Deep-dive Individual Analysis',
+    quickNavSub:   'Head to the stock or crypto pages for DCF, AI scores, and on-chain metrics.',
+    toStockBtn:    '📊 Stock Analysis →',
+    toCryptoBtn:   '₿ Crypto Analysis →',
+
+    /* Footer Disclaimer */
+    disclaimerTitle: 'Commercial Investment Disclaimer',
+    disclaimerBody:  'Sector and stock recommendations provided by this service are statistical data based on quantitative algorithms only. They do not solicit the purchase or sale of any specific stock, and we bear no responsibility for investment losses.',
+    footerNote:      'Not for actual investment decisions.',
+
+    /* Loading / Error */
+    loading: 'Loading market data…',
+    errorTitle: 'Data Load Failed',
+    errorHint:  'Please try again later.',
+    retryBtn:   'Retry',
+  },
+} as const;
+
+// ─────────────────────────────────────────────
 // 공개 export
 // ─────────────────────────────────────────────
 export type Lang = 'ko' | 'en';
 
 export const translations = {
-  ko: { dashboard: dashboard.ko, about: about.ko, crypto: crypto.ko },
-  en: { dashboard: dashboard.en, about: about.en, crypto: crypto.en },
+  ko: { dashboard: dashboard.ko, about: about.ko, crypto: crypto.ko, market: market.ko },
+  en: { dashboard: dashboard.en, about: about.en, crypto: crypto.en, market: market.en },
 } as const;
 
 // 두 언어 타입의 합집합 — KO/EN 모두 할당 가능
 export type DashboardT = typeof translations['ko']['dashboard'] | typeof translations['en']['dashboard'];
 export type AboutT     = typeof translations['ko']['about']     | typeof translations['en']['about'];
 export type CryptoT    = typeof translations['ko']['crypto']    | typeof translations['en']['crypto'];
+export type MarketT    = typeof translations['ko']['market']    | typeof translations['en']['market'];
