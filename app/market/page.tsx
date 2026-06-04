@@ -363,54 +363,59 @@ function SectorStockCard({
 }
 
 /* ═══════════════════════════════════════════════════════════════
- * 4. TrendingSectorCard — 섹터 카드 (클릭 시 인라인 확장)
+ * 4-A. SectorSummaryCard — 섹터 요약 카드 (컴팩트, 3열 그리드용)
+ *
+ * 핵심 결정: 확장 패널을 이 카드 안에 두지 않음.
+ * 이유: md:grid-cols-3 컬럼 너비(~280px)에서 긴 선정 사유 텍스트와
+ *       sm:grid-cols-2 종목 카드가 동시에 렌더링될 때 콘텐츠가 컬럼
+ *       경계를 벗어나는 overflow 문제가 발생한다.
+ * 해결: 확장 패널을 그리드 외부(TrendingSectorsSection)에서 전체 너비로 렌더링.
  * ═══════════════════════════════════════════════════════════════ */
-function TrendingSectorCard({
-  sector, lang, t,
-  isExpanded, onToggle,
+function SectorSummaryCard({
+  sector, lang, t, isActive, onToggle,
 }: {
   sector: TrendingSector;
   lang: Lang;
   t: MarketT;
-  isExpanded: boolean;
+  isActive: boolean;
   onToggle: () => void;
 }) {
   const cs = SECTOR_COLORS[sector.colorKey];
 
   return (
     <div className={cn(
-      'border rounded-2xl overflow-hidden transition-all duration-300 shadow-lg',
+      'border rounded-2xl overflow-hidden transition-colors duration-200 shadow-lg',
       cs.card,
-      cs.border,
-      cs.glow,
+      /* 활성 섹터는 테두리를 밝게 */
+      isActive ? cn(cs.border, '[box-shadow:0_0_0_1px_inset_rgba(255,255,255,0.06)]') : cs.border,
     )}>
-      {/* 섹터 요약 헤더 (항상 표시) */}
-      <div className="p-4 sm:p-5">
+      {/* 요약 본문 */}
+      <div className="p-4">
         {/* 이모지 + 섹터명 */}
         <div className="flex items-start gap-3 mb-3">
           <div className={cn(
-            'w-10 h-10 sm:w-11 sm:h-11 rounded-xl border flex items-center justify-center text-xl flex-shrink-0',
+            'w-10 h-10 rounded-xl border flex items-center justify-center text-xl flex-shrink-0',
             cs.iconBg,
           )}>
             {sector.emoji}
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-white font-bold text-sm sm:text-base leading-tight">
+            <h3 className="text-white font-bold text-sm leading-tight">
               {lang === 'ko' ? sector.name.ko : sector.name.en}
             </h3>
-            <p className={cn('text-[10px] mt-0.5 font-semibold', cs.badgeText)}>
+            <p className={cn('text-[10px] mt-0.5 font-semibold leading-relaxed', cs.badgeText)}>
               {lang === 'ko' ? sector.theme.ko : sector.theme.en}
             </p>
           </div>
         </div>
 
-        {/* 선정 이유 (요약) */}
-        <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">
+        {/* 선정 이유 — 2줄 클램프 */}
+        <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-2 mb-3">
           {lang === 'ko' ? sector.reason.ko : sector.reason.en}
         </p>
 
-        {/* 대장주/이슈주 미리보기 칩 */}
-        <div className="flex items-center gap-2 mt-3 flex-wrap">
+        {/* 대장주·이슈주 미리보기 칩 */}
+        <div className="flex items-center gap-1.5 flex-wrap">
           {sector.stocks.map(s => (
             <span key={s.ticker}
               className={cn(
@@ -425,44 +430,101 @@ function TrendingSectorCard({
 
       {/* 토글 버튼 */}
       <button
+        type="button"
         onClick={onToggle}
         className={cn(
           'w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold',
           'border-t transition-colors',
           'border-gray-800/50',
-          isExpanded
-            ? cn('text-gray-300 hover:text-white', cs.expandBg)
+          isActive
+            ? cn(cs.badgeText, cs.expandBg, 'hover:brightness-110')
             : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.02]',
         )}
       >
-        {isExpanded
+        {isActive
           ? <><ChevronUp className="w-3.5 h-3.5" /> {t.closeDetail}</>
           : <><ChevronDown className="w-3.5 h-3.5" /> {t.viewDetail}</>
         }
       </button>
+    </div>
+  );
+}
 
-      {/* 확장 패널 — 대장주·이슈주 상세 */}
-      {isExpanded && (
-        <div className={cn('border-t border-gray-800/40', cs.expandBg, 'p-4 sm:p-5')}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {sector.stocks.map(stock => (
-              <SectorStockCard
-                key={stock.ticker}
-                stock={stock}
-                colorKey={sector.colorKey}
-                lang={lang}
-                t={t}
-              />
-            ))}
-          </div>
-          {/* 선정 이유 전체 (두 줄 이상) */}
-          <div className="mt-3 pt-3 border-t border-gray-800/40">
-            <p className="text-[10px] text-gray-600 leading-relaxed">
-              {lang === 'ko' ? sector.reason.ko : sector.reason.en}
+/* ═══════════════════════════════════════════════════════════════
+ * 4-B. SectorDetailPanel — 전체 너비 확장 패널
+ *
+ * 그리드 바깥에서 렌더링되므로 페이지 전체 너비를 자유롭게 사용.
+ * sm:grid-cols-2 종목 카드와 긴 선정 사유 텍스트 모두 오버플로 없이 표시됨.
+ * ═══════════════════════════════════════════════════════════════ */
+function SectorDetailPanel({
+  sector, lang, t, onClose,
+}: {
+  sector: TrendingSector;
+  lang: Lang;
+  t: MarketT;
+  onClose: () => void;
+}) {
+  const cs = SECTOR_COLORS[sector.colorKey];
+
+  return (
+    <div className={cn(
+      'mt-3 rounded-2xl border overflow-hidden shadow-xl',
+      cs.expandBg,
+      cs.border,
+    )}>
+      {/* 패널 헤더: 섹터명 + 닫기 버튼 */}
+      <div className={cn(
+        'flex items-center justify-between gap-3',
+        'px-4 sm:px-5 py-3 border-b border-gray-800/50',
+      )}>
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-2xl flex-shrink-0">{sector.emoji}</span>
+          <div className="min-w-0">
+            <p className="text-white font-bold text-sm leading-tight">
+              {lang === 'ko' ? sector.name.ko : sector.name.en}
+            </p>
+            <p className={cn('text-[10px] font-semibold truncate', cs.badgeText)}>
+              {lang === 'ko' ? sector.theme.ko : sector.theme.en}
             </p>
           </div>
         </div>
-      )}
+        <button
+          type="button"
+          onClick={onClose}
+          className={cn(
+            'flex-shrink-0 flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors',
+            'text-gray-400 border-gray-700/50 hover:text-white hover:border-gray-500',
+          )}
+        >
+          <ChevronUp className="w-3.5 h-3.5" />
+          {t.closeDetail}
+        </button>
+      </div>
+
+      {/* 종목 카드 그리드 — 전체 너비이므로 sm:grid-cols-2 안전 */}
+      <div className="p-4 sm:p-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          {sector.stocks.map(stock => (
+            <SectorStockCard
+              key={stock.ticker}
+              stock={stock}
+              colorKey={sector.colorKey}
+              lang={lang}
+              t={t}
+            />
+          ))}
+        </div>
+
+        {/* 섹터 선정 이유 — 전체 텍스트 (클램프 없음) */}
+        <div className="mt-4 pt-4 border-t border-gray-800/40">
+          <p className="text-[11px] text-gray-600 leading-relaxed">
+            💡 {lang === 'ko' ? sector.reason.ko : sector.reason.en}
+          </p>
+          <p className="text-[10px] text-gray-700 mt-2">
+            📊 {t.sectorsNote}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -477,40 +539,53 @@ function TrendingSectorsSection({
   lang: Lang;
   t: MarketT;
 }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggle = useCallback((id: string) => {
-    setExpanded(prev => prev === id ? null : id);
+    setExpandedId(prev => prev === id ? null : id);
   }, []);
+
+  const activeSector = sectors.find(s => s.id === expandedId) ?? null;
 
   return (
     <div>
       {/* 섹션 헤더 */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-3">
         <p className="text-xs font-bold text-gray-500 uppercase tracking-widest whitespace-nowrap">
           {t.sectorsTitle}
         </p>
         <div className="flex-1 h-px bg-gray-800" />
         <TrendingUp className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
       </div>
-      <p className="text-sm text-gray-400 mb-1 -mt-2">{t.sectorsSub}</p>
+      <p className="text-sm text-gray-400 mb-1">{t.sectorsSub}</p>
       <p className="text-[11px] text-gray-600 mb-4 leading-relaxed">
         📊 {t.sectorsNote}
       </p>
 
-      {/* 섹터 카드 그리드: 모바일 1열, md 3열 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* ── 섹터 요약 카드 그리드 (모바일 1열, sm 3열) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         {sectors.map(sector => (
-          <TrendingSectorCard
+          <SectorSummaryCard
             key={sector.id}
             sector={sector}
             lang={lang}
             t={t}
-            isExpanded={expanded === sector.id}
+            isActive={expandedId === sector.id}
             onToggle={() => toggle(sector.id)}
           />
         ))}
       </div>
+
+      {/* ── 전체 너비 확장 패널 (그리드 외부 — 오버플로 없음) ── */}
+      {activeSector && (
+        <SectorDetailPanel
+          key={activeSector.id}
+          sector={activeSector}
+          lang={lang}
+          t={t}
+          onClose={() => setExpandedId(null)}
+        />
+      )}
     </div>
   );
 }
