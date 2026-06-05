@@ -1219,7 +1219,9 @@ const market = {
     /* Hero */
     heroTitle: 'Market Pulse',
     heroSub:   '실시간 시장 동향 · 주도 섹터 분석 · 급등락 랭킹',
-    heroBadge: '시뮬레이션 데이터',
+    heroBadge:     '시뮬레이션 데이터',
+    heroBadgeLive: '🟢 실시간 KIS 데이터',
+    dataBannerLive: '한국 급등/급락/거래량 데이터를 한국투자증권 Open API에서 실시간으로 가져오고 있습니다. 미국 데이터 및 섹터 정보는 참고용 큐레이션 데이터입니다.',
 
     /* 데이터 안내 배너 */
     dataBannerText: '본 데이터는 실제 시장을 반영하지 않는 시뮬레이션 참고용입니다. 향후 한국투자증권 Open API 또는 DART API 연동 시 실시간 업데이트됩니다.',
@@ -1278,7 +1280,9 @@ const market = {
     /* Hero */
     heroTitle: 'Market Pulse',
     heroSub:   'Real-time market trends · Leading sectors · Mover rankings',
-    heroBadge: 'Simulated Data',
+    heroBadge:     'Simulated Data',
+    heroBadgeLive: '🟢 Live KIS Data',
+    dataBannerLive: 'Korean market movers (gainers, losers, volume) are served live from Korea Investment & Securities Open API. US data and sector info are curated reference data.',
 
     /* Data note banner */
     dataBannerText: 'This data is simulated and does not reflect actual market conditions. It will update in real-time once integrated with Korea Investment & Securities Open API or DART API.',

@@ -230,10 +230,22 @@ function MarketMoversSection({
           <div className="w-8 h-8 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center flex-shrink-0">
             <Zap className="w-4 h-4 text-teal-400" />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h2 className="text-white font-bold text-sm sm:text-base">{t.moversTitle}</h2>
             <p className="text-gray-500 text-xs mt-0.5">{t.moversSub}</p>
           </div>
+          {/* KR 데이터 출처 배지 */}
+          {marketTab === 'kr' && (
+            data.dataSource === 'live' ? (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/10 border-emerald-500/25 text-emerald-400 flex-shrink-0">
+                KIS Live
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-gray-800/60 border-gray-700/40 text-gray-500 flex-shrink-0">
+                Mock
+              </span>
+            )
+          )}
         </div>
       </div>
 
@@ -793,17 +805,32 @@ export default function MarketPulseDashboard() {
         </div>
       </header>
 
-      {/* ── 데이터 안내 배너 ─────────────────────────────── */}
-      <div className="w-full flex items-start gap-2 px-4 sm:px-6 py-2.5"
-        style={{
-          backgroundColor: 'rgba(13, 148, 136, 0.08)',
-          borderBottom: '1px solid rgba(20, 184, 166, 0.15)',
-        }}>
-        <span className="text-teal-400 text-sm flex-shrink-0 mt-0.5">💡</span>
-        <p className="text-teal-200/70 text-xs leading-relaxed">
-          {t.dataBannerText}
-        </p>
-      </div>
+      {/* ── 데이터 안내 배너 (live/mock 분기) ──────────────── */}
+      {data?.dataSource === 'live' ? (
+        /* 실시간 KIS 연동 중 — 초록 배너 */
+        <div className="w-full flex items-start gap-2 px-4 sm:px-6 py-2.5"
+          style={{
+            backgroundColor: 'rgba(16, 185, 129, 0.07)',
+            borderBottom: '1px solid rgba(16, 185, 129, 0.20)',
+          }}>
+          <span className="text-emerald-400 text-sm flex-shrink-0 mt-0.5">🟢</span>
+          <p className="text-emerald-200/80 text-xs leading-relaxed">
+            {t.dataBannerLive}
+          </p>
+        </div>
+      ) : (
+        /* 시뮬레이션 / KIS 미연결 — 기존 teal 배너 */
+        <div className="w-full flex items-start gap-2 px-4 sm:px-6 py-2.5"
+          style={{
+            backgroundColor: 'rgba(13, 148, 136, 0.08)',
+            borderBottom: '1px solid rgba(20, 184, 166, 0.15)',
+          }}>
+          <span className="text-teal-400 text-sm flex-shrink-0 mt-0.5">💡</span>
+          <p className="text-teal-200/70 text-xs leading-relaxed">
+            {t.dataBannerText}
+          </p>
+        </div>
+      )}
 
       {/* ── MAIN ────────────────────────────────────────────── */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 space-y-6 sm:space-y-8">
@@ -815,15 +842,25 @@ export default function MarketPulseDashboard() {
               <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
                 {t.heroTitle}
               </h1>
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-300">
-                {t.heroBadge}
-              </span>
+              {/* dataSource에 따른 배지 색상/문구 분기 */}
+              {data?.dataSource === 'live' ? (
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-emerald-500/10 border-emerald-500/30 text-emerald-300">
+                  {t.heroBadgeLive}
+                </span>
+              ) : (
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-300">
+                  {t.heroBadge}
+                </span>
+              )}
             </div>
             <p className="text-gray-400 text-sm sm:text-base">{t.heroSub}</p>
           </div>
           {data && (
             <div className="flex items-center gap-2 text-xs text-gray-600 flex-shrink-0">
-              <div className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+              <div className={cn(
+                'w-1.5 h-1.5 rounded-full animate-pulse',
+                data.dataSource === 'live' ? 'bg-emerald-400' : 'bg-teal-400',
+              )} />
               {new Date(data.fetchedAt).toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US', {
                 month: 'short', day: 'numeric',
                 hour: '2-digit', minute: '2-digit',
